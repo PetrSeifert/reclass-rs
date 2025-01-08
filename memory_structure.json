@@ -1,0 +1,513 @@
+{
+  "root_class": {
+    "name": "root",
+    "address": 24576,
+    "class_definition": {
+      "id": 1,
+      "name": "Root1",
+      "fields": [
+        {
+          "id": 3,
+          "name": null,
+          "field_type": "Hex8",
+          "offset": 0,
+          "class_name": null
+        },
+        {
+          "id": 5,
+          "name": "var_2",
+          "field_type": "ClassInstance",
+          "offset": 1,
+          "class_name": "NewClass_1"
+        },
+        {
+          "id": 1,
+          "name": null,
+          "field_type": "Hex32",
+          "offset": 1,
+          "class_name": null
+        },
+        {
+          "id": 2,
+          "name": "var_2",
+          "field_type": "ClassInstance",
+          "offset": 5,
+          "class_name": "NewClass2"
+        },
+        {
+          "id": 3,
+          "name": null,
+          "field_type": "Hex8",
+          "offset": 5,
+          "class_name": null
+        },
+        {
+          "id": 4,
+          "name": "var_4",
+          "field_type": "ClassInstance",
+          "offset": 6,
+          "class_name": "NewClass2"
+        },
+        {
+          "id": 2,
+          "name": null,
+          "field_type": "Hex8",
+          "offset": 6,
+          "class_name": null
+        }
+      ],
+      "total_size": 7
+    },
+    "fields": [
+      {
+        "def_id": 3,
+        "name": null,
+        "field_type": "Hex8",
+        "address": 24576,
+        "data": null,
+        "error": null,
+        "is_editing": false,
+        "nested_instance": null
+      },
+      {
+        "def_id": 5,
+        "name": "var_2",
+        "field_type": "ClassInstance",
+        "address": 24577,
+        "data": null,
+        "error": null,
+        "is_editing": false,
+        "nested_instance": {
+          "name": "var_2",
+          "address": 24577,
+          "class_definition": {
+            "id": 3,
+            "name": "NewClass_1",
+            "fields": [
+              {
+                "id": 5,
+                "name": null,
+                "field_type": "Hex32",
+                "offset": 0,
+                "class_name": null
+              },
+              {
+                "id": 8,
+                "name": null,
+                "field_type": "Hex8",
+                "offset": 4,
+                "class_name": null
+              }
+            ],
+            "total_size": 5
+          },
+          "fields": [
+            {
+              "def_id": 5,
+              "name": null,
+              "field_type": "Hex32",
+              "address": 24577,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": null
+            },
+            {
+              "def_id": 8,
+              "name": null,
+              "field_type": "Hex8",
+              "address": 24581,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": null
+            }
+          ],
+          "total_size": 5
+        }
+      },
+      {
+        "def_id": 1,
+        "name": null,
+        "field_type": "Hex32",
+        "address": 24582,
+        "data": null,
+        "error": null,
+        "is_editing": false,
+        "nested_instance": null
+      },
+      {
+        "def_id": 2,
+        "name": "var_2",
+        "field_type": "ClassInstance",
+        "address": 24586,
+        "data": null,
+        "error": null,
+        "is_editing": false,
+        "nested_instance": {
+          "name": "var_2",
+          "address": 24586,
+          "class_definition": {
+            "id": 2,
+            "name": "NewClass2",
+            "fields": [
+              {
+                "id": 6,
+                "name": "var_5",
+                "field_type": "ClassInstance",
+                "offset": 0,
+                "class_name": "NewClass_1"
+              },
+              {
+                "id": 7,
+                "name": "var_2",
+                "field_type": "Bool",
+                "offset": 0,
+                "class_name": null
+              },
+              {
+                "id": 8,
+                "name": "var_2",
+                "field_type": "TextPointer",
+                "offset": 1,
+                "class_name": null
+              }
+            ],
+            "total_size": 9
+          },
+          "fields": [
+            {
+              "def_id": 6,
+              "name": "var_5",
+              "field_type": "ClassInstance",
+              "address": 24586,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": {
+                "name": "var_5",
+                "address": 24586,
+                "class_definition": {
+                  "id": 3,
+                  "name": "NewClass_1",
+                  "fields": [
+                    {
+                      "id": 5,
+                      "name": null,
+                      "field_type": "Hex32",
+                      "offset": 0,
+                      "class_name": null
+                    },
+                    {
+                      "id": 8,
+                      "name": null,
+                      "field_type": "Hex8",
+                      "offset": 4,
+                      "class_name": null
+                    }
+                  ],
+                  "total_size": 5
+                },
+                "fields": [
+                  {
+                    "def_id": 5,
+                    "name": null,
+                    "field_type": "Hex32",
+                    "address": 24586,
+                    "data": null,
+                    "error": null,
+                    "is_editing": false,
+                    "nested_instance": null
+                  },
+                  {
+                    "def_id": 8,
+                    "name": null,
+                    "field_type": "Hex8",
+                    "address": 24590,
+                    "data": null,
+                    "error": null,
+                    "is_editing": false,
+                    "nested_instance": null
+                  }
+                ],
+                "total_size": 5
+              }
+            },
+            {
+              "def_id": 7,
+              "name": "var_2",
+              "field_type": "Bool",
+              "address": 24591,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": null
+            },
+            {
+              "def_id": 8,
+              "name": "var_2",
+              "field_type": "TextPointer",
+              "address": 24592,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": null
+            }
+          ],
+          "total_size": 14
+        }
+      },
+      {
+        "def_id": 3,
+        "name": null,
+        "field_type": "Hex8",
+        "address": 24600,
+        "data": null,
+        "error": null,
+        "is_editing": false,
+        "nested_instance": null
+      },
+      {
+        "def_id": 4,
+        "name": "var_4",
+        "field_type": "ClassInstance",
+        "address": 24601,
+        "data": null,
+        "error": null,
+        "is_editing": false,
+        "nested_instance": {
+          "name": "var_4",
+          "address": 24601,
+          "class_definition": {
+            "id": 2,
+            "name": "NewClass2",
+            "fields": [
+              {
+                "id": 6,
+                "name": "var_5",
+                "field_type": "ClassInstance",
+                "offset": 0,
+                "class_name": "NewClass_1"
+              },
+              {
+                "id": 7,
+                "name": "var_2",
+                "field_type": "Bool",
+                "offset": 0,
+                "class_name": null
+              },
+              {
+                "id": 8,
+                "name": "var_2",
+                "field_type": "TextPointer",
+                "offset": 1,
+                "class_name": null
+              }
+            ],
+            "total_size": 9
+          },
+          "fields": [
+            {
+              "def_id": 6,
+              "name": "var_5",
+              "field_type": "ClassInstance",
+              "address": 24601,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": {
+                "name": "var_5",
+                "address": 24601,
+                "class_definition": {
+                  "id": 3,
+                  "name": "NewClass_1",
+                  "fields": [
+                    {
+                      "id": 5,
+                      "name": null,
+                      "field_type": "Hex32",
+                      "offset": 0,
+                      "class_name": null
+                    },
+                    {
+                      "id": 8,
+                      "name": null,
+                      "field_type": "Hex8",
+                      "offset": 4,
+                      "class_name": null
+                    }
+                  ],
+                  "total_size": 5
+                },
+                "fields": [
+                  {
+                    "def_id": 5,
+                    "name": null,
+                    "field_type": "Hex32",
+                    "address": 24601,
+                    "data": null,
+                    "error": null,
+                    "is_editing": false,
+                    "nested_instance": null
+                  },
+                  {
+                    "def_id": 8,
+                    "name": null,
+                    "field_type": "Hex8",
+                    "address": 24605,
+                    "data": null,
+                    "error": null,
+                    "is_editing": false,
+                    "nested_instance": null
+                  }
+                ],
+                "total_size": 5
+              }
+            },
+            {
+              "def_id": 7,
+              "name": "var_2",
+              "field_type": "Bool",
+              "address": 24606,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": null
+            },
+            {
+              "def_id": 8,
+              "name": "var_2",
+              "field_type": "TextPointer",
+              "address": 24607,
+              "data": null,
+              "error": null,
+              "is_editing": false,
+              "nested_instance": null
+            }
+          ],
+          "total_size": 14
+        }
+      },
+      {
+        "def_id": 2,
+        "name": null,
+        "field_type": "Hex8",
+        "address": 24615,
+        "data": null,
+        "error": null,
+        "is_editing": false,
+        "nested_instance": null
+      }
+    ],
+    "total_size": 40
+  },
+  "class_registry": {
+    "definitions": {
+      "Root1": {
+        "id": 1,
+        "name": "Root1",
+        "fields": [
+          {
+            "id": 3,
+            "name": null,
+            "field_type": "Hex8",
+            "offset": 0,
+            "class_name": null
+          },
+          {
+            "id": 5,
+            "name": "var_2",
+            "field_type": "ClassInstance",
+            "offset": 1,
+            "class_name": "NewClass_1"
+          },
+          {
+            "id": 1,
+            "name": null,
+            "field_type": "Hex32",
+            "offset": 1,
+            "class_name": null
+          },
+          {
+            "id": 2,
+            "name": "var_2",
+            "field_type": "ClassInstance",
+            "offset": 5,
+            "class_name": "NewClass2"
+          },
+          {
+            "id": 3,
+            "name": null,
+            "field_type": "Hex8",
+            "offset": 5,
+            "class_name": null
+          },
+          {
+            "id": 4,
+            "name": "var_4",
+            "field_type": "ClassInstance",
+            "offset": 6,
+            "class_name": "NewClass2"
+          },
+          {
+            "id": 2,
+            "name": null,
+            "field_type": "Hex8",
+            "offset": 6,
+            "class_name": null
+          }
+        ],
+        "total_size": 7
+      },
+      "NewClass2": {
+        "id": 2,
+        "name": "NewClass2",
+        "fields": [
+          {
+            "id": 6,
+            "name": "var_5",
+            "field_type": "ClassInstance",
+            "offset": 0,
+            "class_name": "NewClass_1"
+          },
+          {
+            "id": 7,
+            "name": "var_2",
+            "field_type": "Bool",
+            "offset": 0,
+            "class_name": null
+          },
+          {
+            "id": 8,
+            "name": "var_2",
+            "field_type": "TextPointer",
+            "offset": 1,
+            "class_name": null
+          }
+        ],
+        "total_size": 9
+      },
+      "NewClass_1": {
+        "id": 3,
+        "name": "NewClass_1",
+        "fields": [
+          {
+            "id": 5,
+            "name": null,
+            "field_type": "Hex32",
+            "offset": 0,
+            "class_name": null
+          },
+          {
+            "id": 8,
+            "name": null,
+            "field_type": "Hex8",
+            "offset": 4,
+            "class_name": null
+          }
+        ],
+        "total_size": 5
+      }
+    }
+  }
+}
