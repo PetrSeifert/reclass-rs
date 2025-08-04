@@ -5,6 +5,8 @@ use crate::re_class_app::ReClassApp;
 pub struct WindowManager {
     pub show_process_window: bool,
     pub show_modules_window: bool,
+    pub process_filter: String,
+    pub modules_filter: String,
 }
 
 impl WindowManager {
@@ -12,6 +14,8 @@ impl WindowManager {
         Self {
             show_process_window: false,
             show_modules_window: false,
+            process_filter: String::new(),
+            modules_filter: String::new(),
         }
     }
 
@@ -29,17 +33,59 @@ impl WindowManager {
                                 log::error!("Failed to fetch processes: {}", e);
                             }
                         }
-                        ui.label(format!("Found {} processes", app.get_processes().len()));
+                        let total_count = app.get_processes().len();
+                        let filtered_count = if self.process_filter.is_empty() {
+                            total_count
+                        } else {
+                            app.get_processes_snapshot()
+                                .into_iter()
+                                .filter(|(_, name)| {
+                                    name.to_lowercase()
+                                        .contains(&self.process_filter.to_lowercase())
+                                })
+                                .count()
+                        };
+                        if self.process_filter.is_empty() {
+                            ui.label(format!("Found {} processes", total_count));
+                        } else {
+                            ui.label(format!(
+                                "Found {} processes ({} filtered)",
+                                total_count, filtered_count
+                            ));
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Filter input
+                    ui.horizontal(|ui| {
+                        ui.label("Filter:");
+                        ui.text_edit_singleline(&mut self.process_filter);
+                        if ui.button("Clear").clicked() {
+                            self.process_filter.clear();
+                        }
                     });
 
                     ui.separator();
 
                     egui::ScrollArea::vertical()
                         .id_source("process_selection_scroll")
-                        .max_height(ui.available_height() - 80.0)
+                        .max_height(ui.available_height() - 120.0)
                         .show(ui, |ui| {
                             let processes = app.get_processes_snapshot();
-                            for (pid, name) in processes {
+                            let filtered_processes: Vec<_> = if self.process_filter.is_empty() {
+                                processes.into_iter().collect()
+                            } else {
+                                processes
+                                    .into_iter()
+                                    .filter(|(_, name)| {
+                                        name.to_lowercase()
+                                            .contains(&self.process_filter.to_lowercase())
+                                    })
+                                    .collect()
+                            };
+
+                            for (pid, name) in filtered_processes {
                                 let display_text = format!("PID: {} - {}", pid, name);
 
                                 if ui.button(display_text).clicked() {
@@ -90,17 +136,66 @@ impl WindowManager {
 
                         if !modules.is_empty() {
                             ui.horizontal(|ui| {
-                                ui.label(format!("Found {} modules", modules.len()));
+                                let total_count = modules.len();
+                                let filtered_count = if self.modules_filter.is_empty() {
+                                    total_count
+                                } else {
+                                    modules
+                                        .iter()
+                                        .filter(|module| {
+                                            module
+                                                .get_base_dll_name()
+                                                .unwrap_or("")
+                                                .to_lowercase()
+                                                .contains(&self.modules_filter.to_lowercase())
+                                        })
+                                        .count()
+                                };
+                                if self.modules_filter.is_empty() {
+                                    ui.label(format!("Found {} modules", total_count));
+                                } else {
+                                    ui.label(format!(
+                                        "Found {} modules ({} filtered)",
+                                        total_count, filtered_count
+                                    ));
+                                }
                                 if ui.button("Refresh Modules").clicked() {
                                     refresh_clicked = true;
                                 }
                             });
 
+                            // Filter input
+                            ui.horizontal(|ui| {
+                                ui.label("Filter:");
+                                ui.text_edit_singleline(&mut self.modules_filter);
+                                if ui.button("Clear").clicked() {
+                                    self.modules_filter.clear();
+                                }
+                            });
+
+                            ui.separator();
+
                             egui::ScrollArea::vertical()
                                 .id_source("modules_window_scroll")
-                                .max_height(ui.available_height() - 100.0)
+                                .max_height(ui.available_height() - 140.0)
                                 .show(ui, |ui| {
-                                    for module in modules {
+                                    let filtered_modules: Vec<_> = if self.modules_filter.is_empty()
+                                    {
+                                        modules.into_iter().collect()
+                                    } else {
+                                        modules
+                                            .into_iter()
+                                            .filter(|module| {
+                                                module
+                                                    .get_base_dll_name()
+                                                    .unwrap_or("")
+                                                    .to_lowercase()
+                                                    .contains(&self.modules_filter.to_lowercase())
+                                            })
+                                            .collect()
+                                    };
+
+                                    for module in filtered_modules {
                                         ui.horizontal(|ui| {
                                             ui.label(format!(
                                                 "Module: {}",

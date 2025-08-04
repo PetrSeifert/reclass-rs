@@ -10,6 +10,7 @@ use vtd_libum::{
     },
     DriverInterface,
 };
+use crate::memory::{MemoryStructure, MemoryStructureBuilder};
 
 pub struct ProcessState {
     pub processes: Vec<ProcessInfo>,
@@ -31,6 +32,7 @@ pub struct ReClassApp {
     pub ke_interface: Arc<DriverInterface>,
     pub handle: Option<Arc<AppHandle>>,
     pub process_state: ProcessState,
+    pub memory_structure: Option<MemoryStructure>,
 }
 
 impl ReClassApp {
@@ -45,6 +47,7 @@ impl ReClassApp {
             ke_interface,
             handle: None,
             process_state: ProcessState::new(),
+            memory_structure: None,
         })
     }
 
@@ -95,6 +98,45 @@ impl ReClassApp {
                 )
             })
             .collect()
+    }
+
+    /// Set the memory structure
+    pub fn set_memory_structure(&mut self, memory_structure: MemoryStructure) {
+        self.memory_structure = Some(memory_structure);
+    }
+
+    /// Get the current memory structure
+    pub fn get_memory_structure(&self) -> Option<&MemoryStructure> {
+        self.memory_structure.as_ref()
+    }
+
+    /// Get a mutable reference to the memory structure
+    pub fn get_memory_structure_mut(&mut self) -> Option<&mut MemoryStructure> {
+        self.memory_structure.as_mut()
+    }
+
+    /// Clear the memory structure
+    pub fn clear_memory_structure(&mut self) {
+        self.memory_structure = None;
+    }
+
+    /// Create a memory structure from a class definition
+    pub fn create_memory_structure_from_class(&mut self, class_name: &str, address: u64) -> bool {
+        if let Some(class_def) = self.memory_structure.as_ref().and_then(|ms| ms.get_class_definition(class_name)) {
+            let mut builder = MemoryStructureBuilder::new();
+            builder.register_class(class_def.clone());
+            
+            if let Some(mut new_structure) = builder.build(format!("{}_instance", class_name), address, class_name) {
+                // Create nested instances for the new structure
+                new_structure.create_nested_instances();
+                self.memory_structure = Some(new_structure);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 }
 
