@@ -1,0 +1,80 @@
+name: Release on tag
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate Release Notes (PowerShell)
+        id: release_notes
+        shell: pwsh
+        run: |
+          git fetch --unshallow 2>$null
+          git fetch --tags
+          $currentTag = $env:GITHUB_REF -replace '^refs/tags/',''
+          try {
+            $lastTag = git describe --tags --abbrev=0 "$currentTag^"
+          } catch {
+            $lastTag = ''
+          }
+          if ($lastTag) { $range = "$lastTag..$currentTag" } else { $range = '' }
+          if ($range) {
+            $subjects = git log $range --pretty=format:"%s"
+          } else {
+            $subjects = git log --pretty=format:"%s"
+          }
+          $lines = $subjects -split "`n"
+          $filtered = $lines | Where-Object { $_ -and ($_ -notmatch '^(ci|chore)(\(|:)?') }
+          if (-not $filtered -or $filtered.Count -eq 0) { $filtered = @('No user-facing changes since last release.') }
+          $bulleted = ($filtered | ForEach-Object { "- $_" }) -join "`n"
+          if ($lastTag) { $prev = $lastTag } else { $prev = 'initial commit' }
+          $full = "Changes since $($prev):`n`n$bulleted"
+          Add-Content $env:GITHUB_OUTPUT "notes<<EOF"
+          Add-Content $env:GITHUB_OUTPUT $full
+          Add-Content $env:GITHUB_OUTPUT "EOF"
+
+      - name: Build (Windows)
+        id: build
+        shell: pwsh
+        run: |
+          cargo build --release -p re-class
+          $outDir = Join-Path $PWD 'dist'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          Copy-Item -Path target/release/re-class.exe -Destination (Join-Path $outDir 're-class.exe') -Force
+          if (Test-Path README.md) { Copy-Item README.md (Join-Path $outDir 'README.md') }
+          if (Test-Path LICENSE) { Copy-Item LICENSE (Join-Path $outDir 'LICENSE') }
+          $zipPath = "re-class-windows-x86_64-${{ github.ref_name }}.zip"
+          Compress-Archive -Path "$outDir/*" -DestinationPath $zipPath -Force
+          Add-Content $env:GITHUB_OUTPUT "asset=$zipPath"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.release_notes.outputs.notes }}
+          files: |
+            ${{ steps.build.outputs.asset }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
