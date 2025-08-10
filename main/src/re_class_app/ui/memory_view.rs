@@ -1,28 +1,18 @@
-use std::{
-    collections::{
-        HashMap,
-        HashSet,
-    },
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use eframe::egui::{
     self,
-    CentralPanel,
     Color32,
-    Context,
     Layout,
+    RichText,
     ScrollArea,
-    SidePanel,
     TextEdit,
     TextStyle,
-    TopBottomPanel,
     Ui,
 };
 use handle::AppHandle;
-use rfd::FileDialog;
 
-use super::ReClassApp;
+use super::ReClassGui;
 use crate::memory::{
     ClassDefinition,
     ClassDefinitionRegistry,
@@ -32,78 +22,36 @@ use crate::memory::{
     MemoryStructure,
 };
 
-pub struct ReClassGui {
-    app: ReClassApp,
-    attach_window_open: bool,
-    process_filter: String,
-    modules_window_open: bool,
-    needs_rebuild: bool,
-    field_name_buffers: HashMap<FieldKey, String>,
-    class_type_buffers: HashMap<FieldKey, String>,
-    root_class_type_buffer: Option<String>,
-    root_address_buffer: Option<String>,
-    cycle_error_open: bool,
-    cycle_error_text: String,
-    rename_dialog_open: bool,
-    rename_target_name: String,
-    rename_buffer: String,
-    rename_error_text: Option<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FieldKey {
+    pub instance_address: u64,
+    pub field_def_id: u64,
+}
+
+struct FieldCtx {
+    mem_ptr: *mut MemoryStructure,
+    owner_class_name: String,
+    field_index: usize,
+    address: u64,
+    value_preview: Option<String>,
 }
 
 impl ReClassGui {
-    pub fn new() -> anyhow::Result<Self> {
-        Ok(Self {
-            app: ReClassApp::new()?,
-            attach_window_open: false,
-            process_filter: String::new(),
-            modules_window_open: false,
-            needs_rebuild: false,
-            field_name_buffers: HashMap::new(),
-            class_type_buffers: HashMap::new(),
-            root_class_type_buffer: None,
-            root_address_buffer: None,
-            cycle_error_open: false,
-            cycle_error_text: String::new(),
-            rename_dialog_open: false,
-            rename_target_name: String::new(),
-            rename_buffer: String::new(),
-            rename_error_text: None,
-        })
-    }
-
-    fn header_bar(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("Attach to Process").clicked() {
-                self.attach_window_open = true;
-                let _ = self.app.fetch_processes();
-            }
-
-            if let Some(selected) = &self.app.process_state.selected_process {
-                ui.label(format!(
-                    "Attached: {} (PID {})",
-                    selected.get_image_base_name().unwrap_or("Unknown"),
-                    selected.process_id
-                ));
-                if ui.button("Modules").clicked() {
-                    let _ = self.app.fetch_modules(selected.process_id);
-                    self.modules_window_open = true;
-                }
-            } else {
-                ui.label("Not attached");
-            }
-        });
-    }
-
-    fn memory_structure_panel(&mut self, ui: &mut Ui) {
+    pub(super) fn memory_structure_panel(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.heading("Memory Structure");
-            ui.with_layout(Layout::right_to_left(eframe::egui::Align::Center), |ui| {
-                if ui.button("Load").clicked() {
-                    if let Some(path) = FileDialog::new().add_filter("JSON", &["json"]).pick_file()
+            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button("Load")
+                    .on_hover_text("Load a `memory_structure.json` file")
+                    .clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("JSON", &["json"])
+                        .pick_file()
                     {
                         if let Ok(text) = std::fs::read_to_string(&path) {
                             if let Ok(mut ms) = serde_json::from_str::<MemoryStructure>(&text) {
-                                // After deserialization, reseed id counters to avoid collisions with future creations
                                 ms.class_registry.normalize_ids();
                                 ms.create_nested_instances();
                                 self.app.set_memory_structure(ms);
@@ -111,9 +59,13 @@ impl ReClassGui {
                         }
                     }
                 }
-                if ui.button("Save").clicked() {
+                if ui
+                    .button("Save")
+                    .on_hover_text("Save current memory structure to JSON")
+                    .clicked()
+                {
                     if let Some(ms) = self.app.get_memory_structure() {
-                        if let Some(path) = FileDialog::new()
+                        if let Some(path) = rfd::FileDialog::new()
                             .set_file_name("memory_structure.json")
                             .save_file()
                         {
@@ -123,7 +75,11 @@ impl ReClassGui {
                         }
                     }
                 }
-                if ui.button("New").clicked() {
+                if ui
+                    .button("New")
+                    .on_hover_text("Create a fresh root class with a Hex64 field")
+                    .clicked()
+                {
                     let mut root_def = ClassDefinition::new("Root".to_string());
                     root_def.add_hex_field(FieldType::Hex64);
                     let ms = crate::memory::MemoryStructure::new("root".to_string(), 0, root_def);
@@ -175,13 +131,11 @@ impl ReClassGui {
                         && root_class_name != memory.root_class.class_definition.name
                     {
                         let old = memory.root_class.class_definition.name.clone();
-                        // Only rename if target doesn't already exist to prevent stack overflow
                         if !memory.class_registry.contains(&root_class_name) {
                             memory.rename_class(&old, &root_class_name);
                             self.needs_rebuild = true;
                             self.root_class_type_buffer = None;
                         } else {
-                            // Revert buffer to current model value when commit is invalid (name already exists)
                             self.root_class_type_buffer = None;
                         }
                     }
@@ -231,7 +185,6 @@ impl ReClassGui {
         for (idx, field) in instance.fields.iter_mut().enumerate() {
             match field.field_type {
                 FieldType::ClassInstance => {
-                    // Header label for the collapsible
                     let (fname_display, cname_display) =
                         if let Some(nested) = &field.nested_instance {
                             (
@@ -245,10 +198,9 @@ impl ReClassGui {
                             )
                         };
                     let header = format!(
-                        "0x{:08X}  {}: {}  [ClassInstance]",
+                        "0x{:08X}    {}: {}    [ClassInstance]",
                         field.address, fname_display, cname_display
                     );
-                    // Stable id based on owning class definition field id (independent of label text)
                     let def_id = instance
                         .class_definition
                         .fields
@@ -374,7 +326,7 @@ impl ReClassGui {
                 }
                 _ => {
                     let inner = ui.horizontal(|ui| {
-                        ui.label(format!("0x{:08X}", field.address));
+                        ui.monospace(format!("0x{:08X}", field.address));
                         if let Some(name) = field.name.clone() {
                             let def_id = instance
                                 .class_definition
@@ -396,7 +348,6 @@ impl ReClassGui {
                                 && ui.memory(|m| m.has_focus(resp.id));
                             if resp.lost_focus() || enter_on_this {
                                 field.name = Some(fname.clone());
-                                // Propagate to definition
                                 let ms = unsafe { &mut *mem_ptr };
                                 let class_name = instance.class_definition.name.clone();
                                 if let Some(def) = ms.class_registry.get_mut(&class_name) {
@@ -407,15 +358,31 @@ impl ReClassGui {
                                 }
                                 self.field_name_buffers.remove(&key);
                             }
-                            ui.label(format!(": {}", field.field_type));
+                            ui.colored_label(
+                                Color32::from_rgb(170, 190, 255),
+                                format!(": {}", field.field_type),
+                            );
                         } else {
-                            ui.label(format!("{}", field.field_type));
+                            ui.colored_label(
+                                Color32::from_rgb(170, 190, 255),
+                                format!("{}", field.field_type),
+                            );
                         }
-                        ui.label(format!(" ({} bytes)", field.get_size()));
+                        ui.label(RichText::new(format!(" ({} bytes)", field.get_size())).weak());
                         if let Some(val) = field_value_string(handle.clone(), field) {
-                            ui.label(format!("= {}", val));
+                            ui.monospace(format!("= {}", val));
                         }
                     });
+                    let row_bg = if idx % 2 == 0 {
+                        Color32::from_black_alpha(12)
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    ui.painter().rect_filled(
+                        inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                        4.0,
+                        row_bg,
+                    );
                     let ctx = FieldCtx {
                         mem_ptr,
                         owner_class_name: instance.class_definition.name.clone(),
@@ -431,6 +398,13 @@ impl ReClassGui {
                         .unwrap_or(0);
                     let id = ui.id().with(("row_field", def_id, path.clone(), idx));
                     let resp = ui.interact(inner.response.rect, id, egui::Sense::click());
+                    if resp.hovered() {
+                        ui.painter().rect_stroke(
+                            inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                            4.0,
+                            egui::Stroke::new(1.0, Color32::from_white_alpha(12)),
+                        );
+                    }
                     self.context_menu_for_field(&resp, ctx);
                 }
             }
@@ -519,18 +493,16 @@ impl ReClassGui {
             if ui.button("Create class from field").clicked() {
                 let ms = unsafe { &mut *ctx.mem_ptr };
                 let base_name = "NewClass";
-                {
-                    let unique_name = generate_unique_class_name(&ms.class_registry, base_name);
-                    let mut new_def = ClassDefinition::new(unique_name.clone());
-                    new_def.add_hex_field(FieldType::Hex64);
-                    ms.class_registry.register(new_def.clone());
-                    if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                        def.set_field_type_at(ctx.field_index, FieldType::ClassInstance);
-                        if let Some(fd) = def.fields.get_mut(ctx.field_index) {
-                            fd.class_name = Some(unique_name);
-                        }
-                        self.schedule_rebuild();
+                let unique_name = generate_unique_class_name(&ms.class_registry, base_name);
+                let mut new_def = ClassDefinition::new(unique_name.clone());
+                new_def.add_hex_field(FieldType::Hex64);
+                ms.class_registry.register(new_def.clone());
+                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                    def.set_field_type_at(ctx.field_index, FieldType::ClassInstance);
+                    if let Some(fd) = def.fields.get_mut(ctx.field_index) {
+                        fd.class_name = Some(unique_name);
                     }
+                    self.schedule_rebuild();
                 }
                 ui.close_menu();
             }
@@ -538,92 +510,43 @@ impl ReClassGui {
     }
 }
 
-// Helper to clone ProcessInfo when available; returns None if cloning isn't supported at compile time
-#[inline]
-fn maybe_clone_process<T: Clone>(p: &T) -> Option<T> {
-    Some(p.clone())
-}
-
-impl ReClassGui {
-    fn attach_window(&mut self, ctx: &Context) {
-        let mut clicked_pid: Option<u32> = None;
-        egui::Window::new("Attach to Process")
-            .open(&mut self.attach_window_open)
-            .resizable(true)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Filter:");
-                    ui.text_edit_singleline(&mut self.process_filter);
-                    if ui.button("Clear").clicked() {
-                        self.process_filter.clear();
-                    }
-                    if ui.button("Refresh").clicked() {
-                        let _ = self.app.fetch_processes();
-                    }
-                });
-                ui.separator();
-
-                ScrollArea::vertical().show(ui, |ui| {
-                    for process in self.app.get_processes() {
-                        let name = process.get_image_base_name().unwrap_or("Unknown");
-                        if !self.process_filter.is_empty()
-                            && !name
-                                .to_lowercase()
-                                .contains(&self.process_filter.to_lowercase())
-                        {
-                            continue;
-                        }
-
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{} (PID {})", name, process.process_id));
-                            if ui.button("Attach").clicked() {
-                                clicked_pid = Some(process.process_id);
-                            }
-                        });
-                    }
-                });
-            });
-
-        if let Some(pid) = clicked_pid {
-            if let Some(proc_info) = self.app.get_process_by_id(pid) {
-                if let Some(cloned) = maybe_clone_process(proc_info) {
-                    self.app.select_process(cloned);
-                }
-            }
-            let _ = self.app.create_handle(pid);
-            let _ = self.app.fetch_modules(pid);
-            self.attach_window_open = false;
+fn generate_unique_class_name(registry: &ClassDefinitionRegistry, base: &str) -> String {
+    if !registry.contains(base) {
+        return base.to_string();
+    }
+    let mut counter: usize = 1;
+    loop {
+        let candidate = format!("{}_{}", base, counter);
+        if !registry.contains(&candidate) {
+            return candidate;
         }
+        counter += 1;
     }
 }
 
-impl ReClassGui {
-    fn modules_window(&mut self, ctx: &Context) {
-        egui::Window::new("Modules")
-            .open(&mut self.modules_window_open)
-            .resizable(true)
-            .show(ctx, |ui| {
-                if let Some(proc_) = &self.app.process_state.selected_process {
-                    if ui.button("Refresh").clicked() {
-                        let _ = self.app.fetch_modules(proc_.process_id);
-                    }
-                    ui.separator();
-                    ScrollArea::vertical().show(ui, |ui| {
-                        for m in self.app.get_modules() {
-                            let name = m.get_base_dll_name().unwrap_or("Unknown");
-                            ui.label(format!(
-                                "{} @ 0x{:X} ({} KB)",
-                                name,
-                                m.base_address,
-                                m.module_size / 1024
-                            ));
-                        }
-                    });
-                } else {
-                    ui.label("Not attached to a process");
-                }
-            });
+fn parse_hex_u64(s: &str) -> Option<u64> {
+    let t = s.trim();
+    if let Some(stripped) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        u64::from_str_radix(stripped, 16).ok()
+    } else {
+        t.parse::<u64>().ok()
     }
+}
+
+fn text_edit_autowidth(ui: &mut Ui, text: &mut String) -> egui::Response {
+    let display = if text.is_empty() {
+        " ".to_string()
+    } else {
+        text.clone()
+    };
+    let galley =
+        ui.painter()
+            .layout_no_wrap(display, TextStyle::Body.resolve(ui.style()), Color32::WHITE);
+    let width = galley.rect.width() + 12.0;
+    ui.add_sized(
+        [width, ui.text_style_height(&TextStyle::Body)],
+        TextEdit::singleline(text),
+    )
 }
 
 fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Option<String> {
@@ -668,7 +591,6 @@ fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Op
         FieldType::Double => handle.read_sized::<f64>(addr).ok().map(|v| format!("{v}")),
 
         FieldType::Vector3 | FieldType::Vector4 | FieldType::Vector2 => {
-            // Fallback: show raw bytes in hex for now
             let len = field.get_size() as usize;
             let mut buf = vec![0u8; len];
             (handle.read_slice(addr, buf.as_mut_slice()).ok()).map(|_| {
@@ -694,239 +616,4 @@ fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Op
 
         FieldType::ClassInstance => None,
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct FieldKey {
-    instance_address: u64,
-    field_def_id: u64,
-}
-
-struct FieldCtx {
-    mem_ptr: *mut MemoryStructure,
-    owner_class_name: String,
-    field_index: usize,
-    address: u64,
-    value_preview: Option<String>,
-}
-
-fn generate_unique_class_name(registry: &ClassDefinitionRegistry, base: &str) -> String {
-    if !registry.contains(base) {
-        return base.to_string();
-    }
-    let mut counter: usize = 1;
-    loop {
-        let candidate = format!("{}_{}", base, counter);
-        if !registry.contains(&candidate) {
-            return candidate;
-        }
-        counter += 1;
-    }
-}
-
-impl ReClassGui {
-    fn schedule_rebuild(&mut self) {
-        self.needs_rebuild = true;
-    }
-}
-
-impl eframe::App for ReClassGui {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        TopBottomPanel::top("top").show(ctx, |ui| {
-            self.header_bar(ui);
-        });
-
-        SidePanel::left("class_defs_panel").resizable(true).default_width(220.0).show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Class Definitions");
-            });
-            ui.separator();
-            // Snapshot: names, referenced set across all definitions, root name, unused (default-only and unreferenced)
-            let snapshot = self.app.get_memory_structure().map(|ms| {
-                let names = ms.class_registry.get_class_names();
-                let root_name = ms.root_class.class_definition.name.clone();
-                let mut referenced: HashSet<String> = HashSet::new();
-                for cname in &names {
-                    if let Some(def) = ms.class_registry.get(cname) {
-                        for f in &def.fields {
-                            if f.field_type == FieldType::ClassInstance {
-                                if let Some(ref cn) = f.class_name { referenced.insert(cn.clone()); }
-                            }
-                        }
-                    }
-                }
-                // Unused = not referenced anywhere AND has only the default field (single Hex64)
-                let unused: Vec<String> = names
-                    .iter()
-                    .filter(|n| {
-                        if *n == &root_name { return false; }
-                        if referenced.contains(*n) { return false; }
-                        if let Some(def) = ms.class_registry.get(n) {
-                            if def.fields.len() == 1 {
-                                let f = &def.fields[0];
-                                return f.field_type == FieldType::Hex64 && f.name.is_none();
-                            }
-                        }
-                        false
-                    })
-                    .cloned()
-                    .collect();
-                (names, root_name, referenced, unused)
-            });
-
-            if let Some((names, root_name, _referenced, unused)) = snapshot {
-                if ui.add_enabled(!unused.is_empty(), egui::Button::new("Delete unused"))
-                    .on_hover_text("Delete class definitions that have only the default field and are not referenced anywhere (excluding current root)")
-                    .clicked()
-                {
-                    if let Some(ms_mut) = self.app.get_memory_structure_mut() {
-                        for cname in &unused { ms_mut.class_registry.remove(cname); }
-                        self.needs_rebuild = true;
-                    }
-                }
-                ui.separator();
-                ScrollArea::vertical().id_source("class_defs_scroll").show(ui, |ui| {
-                    let active = root_name.clone();
-                    for cname in names {
-                        let mut button = egui::Button::new(&cname);
-                        if active == cname {
-                            button = button.fill(egui::Color32::from_rgb(40, 80, 160));
-                        }
-                        let resp = ui.add(button);
-                        if resp.double_clicked() {
-                            if let Some(ms_mut) = self.app.get_memory_structure_mut() {
-                                if ms_mut.set_root_class_by_name(&cname) {
-                                    self.needs_rebuild = true;
-                                }
-                            }
-                        }
-                        resp.context_menu(|ui| {
-                            if ui.button("Rename").clicked() {
-                                self.rename_dialog_open = true;
-                                self.rename_target_name = cname.clone();
-                                self.rename_buffer = cname.clone();
-                                self.rename_error_text = None;
-                                ui.close_menu();
-                            }
-                        });
-                    }
-                });
-            } else {
-                ui.label("No structure loaded");
-            }
-        });
-
-        CentralPanel::default().show(ctx, |ui| {
-            self.memory_structure_panel(ui);
-        });
-
-        // Error dialog for cycle prevention
-        if self.cycle_error_open {
-            let msg = self.cycle_error_text.clone();
-            let mut should_close = false;
-            egui::Window::new("Invalid Operation")
-                .open(&mut self.cycle_error_open)
-                .collapsible(false)
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.label(msg);
-                    if ui.button("OK").clicked() {
-                        should_close = true;
-                    }
-                });
-            if should_close {
-                self.cycle_error_open = false;
-            }
-        }
-
-        // Rename class definition dialog
-        if self.rename_dialog_open {
-            let error_text = self.rename_error_text.clone();
-            let mut should_close = false;
-            egui::Window::new("Rename Class Definition")
-                .open(&mut self.rename_dialog_open)
-                .resizable(false)
-                .collapsible(false)
-                .show(ctx, |ui| {
-                    ui.label(format!("Current: {}", self.rename_target_name));
-                    let resp = ui.text_edit_singleline(&mut self.rename_buffer);
-                    if let Some(err) = &error_text {
-                        ui.colored_label(egui::Color32::RED, err);
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
-                            self.rename_buffer.clear();
-                            self.rename_error_text = None;
-                            should_close = true;
-                        }
-                        if ui.button("OK").clicked()
-                            || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                        {
-                            let new_name = self.rename_buffer.trim().to_string();
-                            if new_name.is_empty() || new_name == self.rename_target_name {
-                                should_close = true;
-                            } else if let Some(ms) = self.app.get_memory_structure_mut() {
-                                if ms.class_registry.contains(&new_name) {
-                                    self.rename_error_text =
-                                        Some("A class with this name already exists.".to_string());
-                                } else {
-                                    let ok = ms.rename_class(&self.rename_target_name, &new_name);
-                                    if ok {
-                                        self.needs_rebuild = true;
-                                        should_close = true;
-                                        self.rename_error_text = None;
-                                    } else {
-                                        self.rename_error_text = Some("Rename failed.".to_string());
-                                    }
-                                }
-                            }
-                        }
-                    });
-                });
-            if should_close {
-                self.rename_dialog_open = false;
-            }
-        }
-
-        // Apply deferred rebuilds after UI frame to avoid mid-frame tree resets
-        if self.needs_rebuild {
-            if let Some(ms) = self.app.get_memory_structure_mut() {
-                ms.rebuild_root_from_registry();
-                ms.create_nested_instances();
-            }
-            self.needs_rebuild = false;
-        }
-
-        if self.attach_window_open {
-            self.attach_window(ctx);
-        }
-        if self.modules_window_open {
-            self.modules_window(ctx);
-        }
-    }
-}
-
-fn parse_hex_u64(s: &str) -> Option<u64> {
-    let t = s.trim();
-    if let Some(stripped) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-        u64::from_str_radix(stripped, 16).ok()
-    } else {
-        t.parse::<u64>().ok()
-    }
-}
-
-fn text_edit_autowidth(ui: &mut Ui, text: &mut String) -> egui::Response {
-    let display = if text.is_empty() {
-        " ".to_string()
-    } else {
-        text.clone()
-    };
-    let galley =
-        ui.painter()
-            .layout_no_wrap(display, TextStyle::Body.resolve(ui.style()), Color32::WHITE);
-    let width = galley.rect.width() + 12.0; // padding
-    ui.add_sized(
-        [width, ui.text_style_height(&TextStyle::Body)],
-        TextEdit::singleline(text),
-    )
 }
