@@ -109,6 +109,10 @@ impl eframe::App for ReClassGui {
                         for f in &def.fields {
                             if f.field_type == crate::memory::FieldType::ClassInstance {
                                 if let Some(ref cn) = f.class_name { referenced.insert(cn.clone()); }
+                            } else if f.field_type == crate::memory::FieldType::Pointer {
+                                if let Some(crate::memory::PointerTarget::ClassName(ref cn)) = f.pointer_target {
+                                    referenced.insert(cn.clone());
+                                }
                             }
                         }
                     }

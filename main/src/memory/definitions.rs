@@ -11,7 +11,10 @@ use serde::{
     Serialize,
 };
 
-use crate::memory::types::FieldType;
+use crate::memory::types::{
+    FieldType,
+    PointerTarget,
+};
 
 static FIELD_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 fn next_field_id() -> u64 {
@@ -30,8 +33,9 @@ pub struct FieldDefinition {
     pub id: u64,
     pub name: Option<String>, // None for hex fields
     pub field_type: FieldType,
-    pub offset: u64,                // Offset from the start of the class
+    pub offset: u64,                           // Offset from the start of the class
     pub class_name: Option<String>, // For ClassInstance fields, stores the target class name
+    pub pointer_target: Option<PointerTarget>, // For Pointer fields, stores target info
 }
 
 impl FieldDefinition {
@@ -43,6 +47,7 @@ impl FieldDefinition {
             field_type,
             offset,
             class_name: None,
+            pointer_target: None,
         }
     }
 
@@ -54,6 +59,7 @@ impl FieldDefinition {
             field_type,
             offset,
             class_name: None,
+            pointer_target: None,
         }
     }
 
@@ -64,6 +70,7 @@ impl FieldDefinition {
             field_type,
             offset,
             class_name: None,
+            pointer_target: None,
         }
     }
 
@@ -174,6 +181,9 @@ impl ClassDefinition {
             f.field_type = new_type.clone();
             if new_type != FieldType::ClassInstance {
                 f.class_name = None;
+            }
+            if new_type != FieldType::Pointer {
+                f.pointer_target = None;
             }
             if !new_type.is_hex_type() && f.name.is_none() {
                 f.name = Some(format!("var_{}", index));

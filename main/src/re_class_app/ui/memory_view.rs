@@ -20,6 +20,7 @@ use crate::memory::{
     FieldType,
     MemoryField,
     MemoryStructure,
+    PointerTarget,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -184,6 +185,192 @@ impl ReClassGui {
     ) {
         for (idx, field) in instance.fields.iter_mut().enumerate() {
             match field.field_type {
+                FieldType::Pointer => {
+                    let def_id = instance
+                        .class_definition
+                        .fields
+                        .get(idx)
+                        .map(|fd| fd.id)
+                        .unwrap_or(0);
+                    // If pointer targets a class -> collapsible with nested
+                    if matches!(field.pointer_target, Some(PointerTarget::ClassName(_))) {
+                        let mut header = format!(
+                            "0x{:08X}    {}: Pointer",
+                            field.address,
+                            field.name.clone().unwrap_or_default()
+                        );
+                        if let Some(PointerTarget::ClassName(cn)) = &field.pointer_target {
+                            header.push_str(&format!(" -> {}", cn));
+                        }
+                        if let Some(h) = &handle {
+                            if let Ok(ptr) = h.read_sized::<u64>(field.address) {
+                                header.push_str(&format!(" (-> 0x{ptr:016X})"));
+                                if ptr != 0 {
+                                    if let Some(PointerTarget::ClassName(cn)) =
+                                        &field.pointer_target
+                                    {
+                                        let ms = unsafe { &mut *mem_ptr };
+                                        if let Some(class_def) = ms.class_registry.get(cn).cloned()
+                                        {
+                                            let nested = ClassInstance::new(
+                                                field.name.clone().unwrap_or_default(),
+                                                ptr,
+                                                class_def,
+                                            );
+                                            field.nested_instance = Some(nested);
+                                        } else {
+                                            field.nested_instance = None;
+                                        }
+                                    } else {
+                                        field.nested_instance = None;
+                                    }
+                                } else {
+                                    field.nested_instance = None;
+                                }
+                            }
+                        }
+                        let collapsing = egui::CollapsingHeader::new(header)
+                            .default_open(false)
+                            .id_source(("ptr_field", def_id, path.clone()))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("Name:");
+                                    let key = FieldKey {
+                                        instance_address: instance.address,
+                                        field_def_id: def_id,
+                                    };
+                                    let mut fname =
+                                        self.field_name_buffers.get(&key).cloned().unwrap_or_else(
+                                            || field.name.clone().unwrap_or_default(),
+                                        );
+                                    let resp = text_edit_autowidth(ui, &mut fname);
+                                    if resp.changed() {
+                                        self.field_name_buffers.insert(key, fname.clone());
+                                    }
+                                    let enter_on_this = ui
+                                        .input(|i| i.key_pressed(egui::Key::Enter))
+                                        && ui.memory(|m| m.has_focus(resp.id));
+                                    if resp.lost_focus() || enter_on_this {
+                                        field.name = Some(fname.clone());
+                                        let ms = unsafe { &mut *mem_ptr };
+                                        let class_name = instance.class_definition.name.clone();
+                                        if let Some(def) = ms.class_registry.get_mut(&class_name) {
+                                            if let Some(fd) = def.fields.get_mut(idx) {
+                                                fd.name = Some(fname);
+                                            }
+                                            self.schedule_rebuild();
+                                        }
+                                        self.field_name_buffers.remove(&key);
+                                    }
+                                });
+                                if let Some(nested) = field.nested_instance.as_mut() {
+                                    ui.separator();
+                                    path.push(idx);
+                                    self.render_instance(ui, nested, handle.clone(), mem_ptr, path);
+                                    path.pop();
+                                }
+                            });
+                        let ctx = FieldCtx {
+                            mem_ptr,
+                            owner_class_name: instance.class_definition.name.clone(),
+                            field_index: idx,
+                            address: field.address,
+                            value_preview: None,
+                        };
+                        self.context_menu_for_field(&collapsing.header_response, ctx);
+                    } else {
+                        // Pointer to primitive -> render simple row (non-collapsible)
+                        let inner = ui.horizontal(|ui| {
+                            ui.monospace(format!("0x{:08X}", field.address));
+                            if let Some(name) = field.name.clone() {
+                                let def_id = instance
+                                    .class_definition
+                                    .fields
+                                    .get(idx)
+                                    .map(|fd| fd.id)
+                                    .unwrap_or(0);
+                                let key = FieldKey {
+                                    instance_address: instance.address,
+                                    field_def_id: def_id,
+                                };
+                                let mut fname =
+                                    self.field_name_buffers.get(&key).cloned().unwrap_or(name);
+                                let resp = text_edit_autowidth(ui, &mut fname);
+                                if resp.changed() {
+                                    self.field_name_buffers.insert(key, fname.clone());
+                                }
+                                let enter_on_this = ui.input(|i| i.key_pressed(egui::Key::Enter))
+                                    && ui.memory(|m| m.has_focus(resp.id));
+                                if resp.lost_focus() || enter_on_this {
+                                    field.name = Some(fname.clone());
+                                    let ms = unsafe { &mut *mem_ptr };
+                                    let class_name = instance.class_definition.name.clone();
+                                    if let Some(def) = ms.class_registry.get_mut(&class_name) {
+                                        if let Some(fd) = def.fields.get_mut(idx) {
+                                            fd.name = Some(fname);
+                                        }
+                                        self.needs_rebuild = true;
+                                    }
+                                    self.field_name_buffers.remove(&key);
+                                }
+                                let type_label = match &field.pointer_target {
+                                    Some(PointerTarget::FieldType(t)) => {
+                                        format!(": {} -> {}", field.field_type, t)
+                                    }
+                                    Some(PointerTarget::ClassName(cn)) => {
+                                        format!(": {} -> {}", field.field_type, cn)
+                                    }
+                                    None => format!(": {}", field.field_type),
+                                };
+                                ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
+                            } else {
+                                let type_label = match &field.pointer_target {
+                                    Some(PointerTarget::FieldType(t)) => {
+                                        format!("{} -> {}", field.field_type, t)
+                                    }
+                                    Some(PointerTarget::ClassName(cn)) => {
+                                        format!("{} -> {}", field.field_type, cn)
+                                    }
+                                    None => format!("{}", field.field_type),
+                                };
+                                ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
+                            }
+                            ui.label(
+                                RichText::new(format!(" ({} bytes)", field.get_size())).weak(),
+                            );
+                            if let Some(val) = field_value_string(handle.clone(), field) {
+                                ui.monospace(format!("= {}", val));
+                            }
+                        });
+                        let row_bg = if idx % 2 == 0 {
+                            Color32::from_black_alpha(12)
+                        } else {
+                            Color32::TRANSPARENT
+                        };
+                        ui.painter().rect_filled(
+                            inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                            4.0,
+                            row_bg,
+                        );
+                        let ctx = FieldCtx {
+                            mem_ptr,
+                            owner_class_name: instance.class_definition.name.clone(),
+                            field_index: idx,
+                            address: field.address,
+                            value_preview: field_value_string(handle.clone(), field),
+                        };
+                        let id = ui.id().with(("row_ptr_prim", def_id, path.clone(), idx));
+                        let resp = ui.interact(inner.response.rect, id, egui::Sense::click());
+                        if resp.hovered() {
+                            ui.painter().rect_stroke(
+                                inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                                4.0,
+                                egui::Stroke::new(1.0, Color32::from_white_alpha(12)),
+                            );
+                        }
+                        self.context_menu_for_field(&resp, ctx);
+                    }
+                }
                 FieldType::ClassInstance => {
                     let (fname_display, cname_display) =
                         if let Some(nested) = &field.nested_instance {
@@ -477,18 +664,122 @@ impl ReClassGui {
                     FieldType::Float,
                     FieldType::Double,
                     FieldType::TextPointer,
+                    FieldType::Pointer,
                 ] {
                     let label = format!("{:?}", t);
                     if ui.button(label).clicked() {
                         let ms = unsafe { &mut *ctx.mem_ptr };
                         if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
                             def.set_field_type_at(ctx.field_index, t.clone());
+                            if t == FieldType::Pointer {
+                                if let Some(fd) = def.fields.get_mut(ctx.field_index) {
+                                    fd.pointer_target =
+                                        Some(PointerTarget::FieldType(FieldType::Hex64));
+                                }
+                            }
                             self.schedule_rebuild();
                         }
                         ui.close_menu();
                     }
                 }
             });
+
+            // Pointer target configuration menu
+            if let Some(ms) = unsafe { (ctx.mem_ptr).as_mut() } {
+                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                    if let Some(fd) = def.fields.get(ctx.field_index) {
+                        if fd.field_type == FieldType::Pointer {
+                            ui.menu_button("Pointer target", |ui| {
+                                ui.menu_button("Primitive", |ui| {
+                                    for t in [
+                                        FieldType::Hex8,
+                                        FieldType::Hex16,
+                                        FieldType::Hex32,
+                                        FieldType::Hex64,
+                                        FieldType::Int8,
+                                        FieldType::Int16,
+                                        FieldType::Int32,
+                                        FieldType::Int64,
+                                        FieldType::UInt8,
+                                        FieldType::UInt16,
+                                        FieldType::UInt32,
+                                        FieldType::UInt64,
+                                        FieldType::Bool,
+                                        FieldType::Float,
+                                        FieldType::Double,
+                                        FieldType::Vector2,
+                                        FieldType::Vector3,
+                                        FieldType::Vector4,
+                                        FieldType::Text,
+                                        FieldType::TextPointer,
+                                    ] {
+                                        let label = format!("{:?}", t);
+                                        if ui.button(label).clicked() {
+                                            let ms = unsafe { &mut *ctx.mem_ptr };
+                                            if let Some(defm) =
+                                                ms.class_registry.get_mut(&ctx.owner_class_name)
+                                            {
+                                                if let Some(fdm) =
+                                                    defm.fields.get_mut(ctx.field_index)
+                                                {
+                                                    fdm.pointer_target =
+                                                        Some(PointerTarget::FieldType(t));
+                                                }
+                                                self.schedule_rebuild();
+                                            }
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+                                ui.menu_button("Class", |ui| {
+                                    if ui.button("Create new class here").clicked() {
+                                        let ms = unsafe { &mut *ctx.mem_ptr };
+                                        let base_name = "NewClass";
+                                        let unique_name = generate_unique_class_name(
+                                            &ms.class_registry,
+                                            base_name,
+                                        );
+                                        let mut new_def = ClassDefinition::new(unique_name.clone());
+                                        new_def.add_hex_field(FieldType::Hex64);
+                                        ms.class_registry.register(new_def);
+                                        if let Some(defm) =
+                                            ms.class_registry.get_mut(&ctx.owner_class_name)
+                                        {
+                                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index)
+                                            {
+                                                fdm.pointer_target =
+                                                    Some(PointerTarget::ClassName(unique_name));
+                                            }
+                                        }
+                                        self.schedule_rebuild();
+                                        ui.close_menu();
+                                    }
+                                    ui.separator();
+                                    let names =
+                                        unsafe { (*ctx.mem_ptr).class_registry.get_class_names() };
+                                    for name in names {
+                                        if ui.button(name.clone()).clicked() {
+                                            let ms = unsafe { &mut *ctx.mem_ptr };
+                                            if let Some(defm) =
+                                                ms.class_registry.get_mut(&ctx.owner_class_name)
+                                            {
+                                                if let Some(fdm) =
+                                                    defm.fields.get_mut(ctx.field_index)
+                                                {
+                                                    fdm.pointer_target =
+                                                        Some(PointerTarget::ClassName(name));
+                                                }
+                                            }
+                                            self.schedule_rebuild();
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    }
+                }
+            }
             ui.separator();
             if ui.button("Create class from field").clicked() {
                 let ms = unsafe { &mut *ctx.mem_ptr };
@@ -614,6 +905,88 @@ fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Op
             }
         }
 
+        FieldType::Pointer => {
+            let ptr = handle.read_sized::<u64>(addr).ok()?;
+            let addr_str = format!("-> 0x{ptr:016X}");
+            if let Some(PointerTarget::FieldType(ref t)) = field.pointer_target {
+                if let Some(val) = read_value_preview_for_type(handle, t, ptr) {
+                    Some(format!("{} = {}", addr_str, val))
+                } else {
+                    Some(addr_str)
+                }
+            } else {
+                Some(addr_str)
+            }
+        }
+
         FieldType::ClassInstance => None,
+    }
+}
+
+fn read_value_preview_for_type(handle: &AppHandle, t: &FieldType, addr: u64) -> Option<String> {
+    match t {
+        FieldType::Hex64 => handle
+            .read_sized::<u64>(addr)
+            .ok()
+            .map(|v| format!("0x{v:016X}")),
+        FieldType::Hex32 => handle
+            .read_sized::<u32>(addr)
+            .ok()
+            .map(|v| format!("0x{v:08X}")),
+        FieldType::Hex16 => handle
+            .read_sized::<u16>(addr)
+            .ok()
+            .map(|v| format!("0x{v:04X}")),
+        FieldType::Hex8 => handle
+            .read_sized::<u8>(addr)
+            .ok()
+            .map(|v| format!("0x{v:02X}")),
+
+        FieldType::UInt64 => handle.read_sized::<u64>(addr).ok().map(|v| v.to_string()),
+        FieldType::UInt32 => handle.read_sized::<u32>(addr).ok().map(|v| v.to_string()),
+        FieldType::UInt16 => handle.read_sized::<u16>(addr).ok().map(|v| v.to_string()),
+        FieldType::UInt8 => handle.read_sized::<u8>(addr).ok().map(|v| v.to_string()),
+
+        FieldType::Int64 => handle.read_sized::<i64>(addr).ok().map(|v| v.to_string()),
+        FieldType::Int32 => handle.read_sized::<i32>(addr).ok().map(|v| v.to_string()),
+        FieldType::Int16 => handle.read_sized::<i16>(addr).ok().map(|v| v.to_string()),
+        FieldType::Int8 => handle.read_sized::<i8>(addr).ok().map(|v| v.to_string()),
+
+        FieldType::Bool => handle.read_sized::<u8>(addr).ok().map(|v| {
+            if v != 0 {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }),
+        FieldType::Float => handle.read_sized::<f32>(addr).ok().map(|v| format!("{v}")),
+        FieldType::Double => handle.read_sized::<f64>(addr).ok().map(|v| format!("{v}")),
+
+        FieldType::Vector3 | FieldType::Vector4 | FieldType::Vector2 => {
+            let len = t.get_size() as usize;
+            let mut buf = vec![0u8; len];
+            (handle.read_slice(addr, buf.as_mut_slice()).ok()).map(|_| {
+                buf.iter()
+                    .map(|b| format!("{:02X}", b))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+        }
+
+        FieldType::Text => handle.read_string(addr, Some(32)).ok(),
+        FieldType::TextPointer => {
+            if let Ok(ptr2) = handle.read_sized::<u64>(addr) {
+                if ptr2 != 0 {
+                    handle.read_string(ptr2, None).ok()
+                } else {
+                    Some(String::from("(null)"))
+                }
+            } else {
+                None
+            }
+        }
+
+        // For nested types that shouldn't appear here
+        FieldType::ClassInstance | FieldType::Pointer => None,
     }
 }

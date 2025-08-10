@@ -44,6 +44,9 @@ pub enum FieldType {
 
     // Class instance type (dynamic size)
     ClassInstance,
+
+    // Generic pointer (64-bit) that can point to any primitive type or class instance
+    Pointer,
 }
 
 impl FieldType {
@@ -62,6 +65,7 @@ impl FieldType {
             FieldType::Vector4 => 16,
             FieldType::Text => 32,
             FieldType::TextPointer => 8,
+            FieldType::Pointer => 8,
             FieldType::ClassInstance => 0, // Dynamic size
         }
     }
@@ -103,6 +107,7 @@ impl FieldType {
             FieldType::Text => "Text",
             FieldType::TextPointer => "TextPointer",
             FieldType::ClassInstance => "ClassInstance",
+            FieldType::Pointer => "Pointer",
         }
     }
 }
@@ -111,4 +116,13 @@ impl fmt::Display for FieldType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.get_display_name())
     }
+}
+
+/// Target information for a `FieldType::Pointer`
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PointerTarget {
+    /// Pointer to a primitive/inline field type (e.g., Int32, Float, TextPointer, etc.)
+    FieldType(FieldType),
+    /// Pointer to a class instance by name
+    ClassName(String),
 }

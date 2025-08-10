@@ -10,7 +10,10 @@ use crate::memory::{
         ClassDefinition,
         ClassDefinitionRegistry,
     },
-    types::FieldType,
+    types::{
+        FieldType,
+        PointerTarget,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +26,7 @@ pub struct MemoryField {
     pub error: Option<String>,
     pub is_editing: bool,
     pub nested_instance: Option<ClassInstance>,
+    pub pointer_target: Option<PointerTarget>,
 }
 
 impl MemoryField {
@@ -36,6 +40,7 @@ impl MemoryField {
             error: None,
             is_editing: false,
             nested_instance: None,
+            pointer_target: None,
         }
     }
 
@@ -49,6 +54,7 @@ impl MemoryField {
             error: None,
             is_editing: false,
             nested_instance: None,
+            pointer_target: None,
         }
     }
 
@@ -94,6 +100,10 @@ impl ClassInstance {
                 None => MemoryField::new_hex(field_def.field_type.clone(), field_address),
             };
             memory_field.def_id = field_def.id;
+            // Copy pointer target metadata for convenience when rendering
+            if field_def.field_type == FieldType::Pointer {
+                memory_field.pointer_target = field_def.pointer_target.clone();
+            }
 
             self.fields.push(memory_field);
 
@@ -164,12 +174,22 @@ impl MemoryStructure {
         for cname in class_names {
             if let Some(def_mut) = self.class_registry.get_mut(&cname) {
                 for f in &mut def_mut.fields {
-                    if f.field_type == FieldType::ClassInstance {
-                        if let Some(ref cn) = f.class_name {
-                            if cn.eq_ignore_ascii_case(old_name) {
-                                f.class_name = Some(new_name.to_string());
+                    match f.field_type {
+                        FieldType::ClassInstance => {
+                            if let Some(ref cn) = f.class_name {
+                                if cn.eq_ignore_ascii_case(old_name) {
+                                    f.class_name = Some(new_name.to_string());
+                                }
                             }
                         }
+                        FieldType::Pointer => {
+                            if let Some(PointerTarget::ClassName(ref mut cn)) = f.pointer_target {
+                                if cn.eq_ignore_ascii_case(old_name) {
+                                    *cn = new_name.to_string();
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -177,12 +197,22 @@ impl MemoryStructure {
 
         if let Some(ref mut moved_def) = moved_def_opt {
             for f in &mut moved_def.fields {
-                if f.field_type == FieldType::ClassInstance {
-                    if let Some(ref cn) = f.class_name {
-                        if cn.eq_ignore_ascii_case(old_name) {
-                            f.class_name = Some(new_name.to_string());
+                match f.field_type {
+                    FieldType::ClassInstance => {
+                        if let Some(ref cn) = f.class_name {
+                            if cn.eq_ignore_ascii_case(old_name) {
+                                f.class_name = Some(new_name.to_string());
+                            }
                         }
                     }
+                    FieldType::Pointer => {
+                        if let Some(PointerTarget::ClassName(ref mut cn)) = f.pointer_target {
+                            if cn.eq_ignore_ascii_case(old_name) {
+                                *cn = new_name.to_string();
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -208,12 +238,22 @@ impl MemoryStructure {
             instance.class_definition.name = new_name.to_string();
         }
         for f in &mut instance.class_definition.fields {
-            if f.field_type == FieldType::ClassInstance {
-                if let Some(ref cn) = f.class_name {
-                    if cn.eq_ignore_ascii_case(old_name) {
-                        f.class_name = Some(new_name.to_string());
+            match f.field_type {
+                FieldType::ClassInstance => {
+                    if let Some(ref cn) = f.class_name {
+                        if cn.eq_ignore_ascii_case(old_name) {
+                            f.class_name = Some(new_name.to_string());
+                        }
                     }
                 }
+                FieldType::Pointer => {
+                    if let Some(PointerTarget::ClassName(cn)) = f.pointer_target.as_mut() {
+                        if cn.eq_ignore_ascii_case(old_name) {
+                            *cn = new_name.to_string();
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         for field in &mut instance.fields {
