@@ -22,6 +22,182 @@ use crate::{
 };
 
 impl ReClassGui {
+    fn eval_address_expr(&self, input: &str) -> Option<u64> {
+        // Simple recursive-descent parser supporting:
+        // numbers (hex 0x.. or decimal), <module.dll>, +, -, parentheses (), deref [expr]
+        struct Parser<'a> {
+            s: &'a [u8],
+            i: usize,
+            gui: &'a ReClassGui,
+        }
+        impl<'a> Parser<'a> {
+            fn new(gui: &'a ReClassGui, s: &'a str) -> Self {
+                Self {
+                    s: s.as_bytes(),
+                    i: 0,
+                    gui,
+                }
+            }
+            fn eof(&self) -> bool {
+                self.i >= self.s.len()
+            }
+            fn peek(&self) -> Option<u8> {
+                self.s.get(self.i).copied()
+            }
+            fn bump(&mut self) {
+                self.i += 1;
+            }
+            fn skip_ws(&mut self) {
+                while let Some(b) = self.peek() {
+                    if b.is_ascii_whitespace() {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            fn consume(&mut self, ch: u8) -> bool {
+                self.skip_ws();
+                if self.peek() == Some(ch) {
+                    self.bump();
+                    true
+                } else {
+                    false
+                }
+            }
+
+            fn parse_number(&mut self) -> Option<u64> {
+                self.skip_ws();
+                let start = self.i;
+                if self.peek() == Some(b'0') {
+                    if self
+                        .s
+                        .get(self.i + 1)
+                        .copied()
+                        .map(|c| c == b'x' || c == b'X')
+                        .unwrap_or(false)
+                    {
+                        self.i += 2;
+                        let hex_start = self.i;
+                        while let Some(b) = self.peek() {
+                            if (b as char).is_ascii_hexdigit() {
+                                self.bump();
+                            } else {
+                                break;
+                            }
+                        }
+                        if self.i == hex_start {
+                            return None;
+                        }
+                        let txt = std::str::from_utf8(&self.s[hex_start..self.i]).ok()?;
+                        return u64::from_str_radix(txt, 16).ok();
+                    }
+                }
+                while let Some(b) = self.peek() {
+                    if (b as char).is_ascii_digit() {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+                if self.i == start {
+                    return None;
+                }
+                let txt = std::str::from_utf8(&self.s[start..self.i]).ok()?;
+                txt.parse::<u64>().ok()
+            }
+
+            fn parse_module_ref(&mut self) -> Option<u64> {
+                self.skip_ws();
+                if !self.consume(b'<') {
+                    return None;
+                }
+                let start = self.i;
+                while let Some(b) = self.peek() {
+                    if b != b'>' {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+                if !self.consume(b'>') {
+                    return None;
+                }
+                let name = std::str::from_utf8(&self.s[start.saturating_sub(0)..self.i - 1])
+                    .ok()?
+                    .trim();
+                // lookup module by base name case-insensitive
+                let lower = name.to_ascii_lowercase();
+                let modules = self.gui.app.get_modules();
+                for m in modules {
+                    let base = m.base_address;
+                    let mname = m.get_base_dll_name().unwrap_or("");
+                    if mname.to_ascii_lowercase() == lower {
+                        return Some(base);
+                    }
+                }
+                None
+            }
+
+            fn parse_factor(&mut self) -> Option<u64> {
+                self.skip_ws();
+                // Parentheses
+                if self.consume(b'(') {
+                    let v = self.parse_expr()?;
+                    if !self.consume(b')') {
+                        return None;
+                    }
+                    return Some(v);
+                }
+                // Deref
+                if self.consume(b'[') {
+                    let addr = self.parse_expr()?;
+                    if !self.consume(b']') {
+                        return None;
+                    }
+                    // read pointer-sized value at addr
+                    let handle = self.gui.app.handle.as_ref()?;
+                    let v = handle.read_sized::<u64>(addr).ok()?;
+                    return Some(v);
+                }
+                // Module ref
+                if let Some(v) = self.parse_module_ref() {
+                    return Some(v);
+                }
+                // Number
+                self.parse_number()
+            }
+
+            fn parse_term(&mut self) -> Option<u64> {
+                self.parse_factor()
+            }
+
+            fn parse_expr(&mut self) -> Option<u64> {
+                let mut acc = self.parse_term()?;
+                loop {
+                    self.skip_ws();
+                    if self.consume(b'+') {
+                        let rhs = self.parse_term()?;
+                        acc = acc.wrapping_add(rhs);
+                    } else if self.consume(b'-') {
+                        let rhs = self.parse_term()?;
+                        acc = acc.wrapping_sub(rhs);
+                    } else {
+                        break;
+                    }
+                }
+                Some(acc)
+            }
+        }
+        let mut p = Parser::new(self, input);
+        let v = p.parse_expr()?;
+        p.skip_ws();
+        if p.eof() {
+            Some(v)
+        } else {
+            None
+        }
+    }
     pub(crate) fn memory_structure_panel(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.heading("Memory Structure");
@@ -136,10 +312,13 @@ impl ReClassGui {
                     let enter_on_this = ui.input(|i| i.key_pressed(egui::Key::Enter))
                         && ui.memory(|m| m.has_focus(resp.id));
                     if resp.lost_focus() || enter_on_this {
-                        if let Some(addr) = parse_hex_u64(&base_hex) {
+                        // Support expressions: arithmetic, <module>, deref []
+                        let parsed = self
+                            .eval_address_expr(&base_hex)
+                            .or_else(|| parse_hex_u64(&base_hex));
+                        if let Some(addr) = parsed {
                             memory.set_root_address(addr);
                         }
-                        self.root_address_buffer = None;
                     }
                 });
 
