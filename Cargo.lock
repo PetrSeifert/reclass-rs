@@ -1583,7 +1583,7 @@ dependencies = [
 
 [[package]]
 name = "handle"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "env_logger",
@@ -2649,7 +2649,7 @@ dependencies = [
 
 [[package]]
 name = "re-class"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "arboard",
