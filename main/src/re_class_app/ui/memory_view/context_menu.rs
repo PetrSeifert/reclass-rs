@@ -14,6 +14,7 @@ pub(super) struct FieldCtx {
     pub mem_ptr: *mut MemoryStructure,
     pub owner_class_name: String,
     pub field_index: usize,
+    pub instance_address: u64,
     pub address: u64,
     pub value_preview: Option<String>,
 }
@@ -21,6 +22,76 @@ pub(super) struct FieldCtx {
 impl ReClassGui {
     pub(super) fn context_menu_for_field(&mut self, response: &egui::Response, ctx: FieldCtx) {
         response.context_menu(|ui| {
+            // If multiple fields are selected in the same instance/class, show only bulk operations
+            let multi_in_same_instance = self
+                .selected_instance_address
+                .map(|addr| addr == ctx.instance_address)
+                .unwrap_or(false);
+            if multi_in_same_instance && !self.selected_fields.is_empty() {
+                let owner = ctx.owner_class_name.clone();
+                let selected_ids: std::collections::HashSet<u64> = self
+                    .selected_fields
+                    .iter()
+                    .filter(|k| k.instance_address == ctx.instance_address)
+                    .map(|k| k.field_def_id)
+                    .collect();
+                if selected_ids.len() > 1 {
+                    ui.label("Selection actions");
+                    if ui.button("Remove fields").clicked() {
+                        self.remove_selected_fields(ctx.mem_ptr, &owner, &selected_ids);
+                        ui.close_menu();
+                        return;
+                    }
+                    ui.menu_button("Change types", |ui| {
+                        for t in [
+                            FieldType::Hex8,
+                            FieldType::Hex16,
+                            FieldType::Hex32,
+                            FieldType::Hex64,
+                            FieldType::Int8,
+                            FieldType::Int16,
+                            FieldType::Int32,
+                            FieldType::Int64,
+                            FieldType::UInt8,
+                            FieldType::UInt16,
+                            FieldType::UInt32,
+                            FieldType::UInt64,
+                            FieldType::Bool,
+                            FieldType::Float,
+                            FieldType::Double,
+                            FieldType::Vector2,
+                            FieldType::Vector3,
+                            FieldType::Vector4,
+                            FieldType::Text,
+                            FieldType::TextPointer,
+                            FieldType::Pointer,
+                            FieldType::Enum,
+                        ] {
+                            let label = format!("{t:?}");
+                            if ui.button(label).clicked() {
+                                self.change_selected_fields_type(
+                                    ctx.mem_ptr,
+                                    &owner,
+                                    &selected_ids,
+                                    t.clone(),
+                                );
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    if ui.button("Create class instances").clicked() {
+                        self.create_class_instances_for_selected(
+                            ctx.mem_ptr,
+                            &owner,
+                            &selected_ids,
+                        );
+                        ui.close_menu();
+                        return;
+                    }
+                    // Do not show single-field actions when multi-select is active
+                    return;
+                }
+            }
             if ui.button("Copy address").clicked() {
                 let _ = arboard::Clipboard::new()
                     .and_then(|mut cb| cb.set_text(format!("0x{:X}", ctx.address)));

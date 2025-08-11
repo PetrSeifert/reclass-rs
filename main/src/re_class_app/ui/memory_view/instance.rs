@@ -89,6 +89,98 @@ fn enum_value_string(
 use crate::re_class_app::ReClassGui;
 
 impl ReClassGui {
+    fn update_selection_for_click(
+        &mut self,
+        ui: &mut Ui,
+        instance_address: u64,
+        clicked_index: usize,
+        def_ids: &[u64],
+        def_id: u64,
+    ) {
+        let mods = ui.input(|i| i.modifiers);
+        let ctrl = mods.command || mods.ctrl;
+        let shift = mods.shift;
+
+        let key = FieldKey {
+            instance_address,
+            field_def_id: def_id,
+        };
+
+        // Enforce single-instance selection
+        if self
+            .selected_instance_address
+            .map(|addr| addr != instance_address)
+            .unwrap_or(false)
+        {
+            self.selected_fields.clear();
+            self.selection_anchor = None;
+            self.selected_instance_address = Some(instance_address);
+        }
+
+        if shift {
+            match self.selection_anchor {
+                Some((anchor_addr, anchor_idx)) if anchor_addr == instance_address => {
+                    let (start, end) = if anchor_idx <= clicked_index {
+                        (anchor_idx, clicked_index)
+                    } else {
+                        (clicked_index, anchor_idx)
+                    };
+                    // Select the whole range
+                    for idx in start..=end {
+                        if let Some(&fid) = def_ids.get(idx) {
+                            let k = FieldKey {
+                                instance_address,
+                                field_def_id: fid,
+                            };
+                            self.selected_fields.insert(k);
+                        }
+                    }
+                    self.selected_instance_address = Some(instance_address);
+                }
+                _ => {
+                    // No valid anchor: treat as single select and set anchor
+                    self.selected_fields.clear();
+                    self.selected_fields.insert(key);
+                    self.selection_anchor = Some((instance_address, clicked_index));
+                    self.selected_instance_address = Some(instance_address);
+                }
+            }
+        } else if ctrl {
+            // Toggle selection
+            if self.selected_fields.contains(&key) {
+                self.selected_fields.remove(&key);
+            } else {
+                if self
+                    .selected_instance_address
+                    .map(|addr| addr == instance_address)
+                    .unwrap_or(true)
+                {
+                    self.selected_fields.insert(key);
+                } else {
+                    // Start selection in this instance
+                    self.selected_fields.clear();
+                    self.selected_fields.insert(key);
+                    self.selected_instance_address = Some(instance_address);
+                }
+                if self.selection_anchor.is_none() {
+                    self.selection_anchor = Some((instance_address, clicked_index));
+                }
+            }
+            if self.selected_fields.is_empty() {
+                self.selection_anchor = None;
+                self.selected_instance_address = None;
+            } else {
+                self.selected_instance_address = Some(instance_address);
+            }
+        } else {
+            // Basic click: single select and set anchor
+            self.selected_fields.clear();
+            self.selected_fields.insert(key);
+            self.selection_anchor = Some((instance_address, clicked_index));
+            self.selected_instance_address = Some(instance_address);
+        }
+    }
+
     pub(super) fn render_instance(
         &mut self,
         ui: &mut Ui,
@@ -97,15 +189,17 @@ impl ReClassGui {
         mem_ptr: *mut MemoryStructure,
         path: &mut Vec<usize>,
     ) {
+        let instance_address = instance.address;
+        let def_ids: Vec<u64> = instance
+            .class_definition
+            .fields
+            .iter()
+            .map(|fd| fd.id)
+            .collect();
         for (idx, field) in instance.fields.iter_mut().enumerate() {
             match field.field_type {
                 FieldType::Pointer => {
-                    let def_id = instance
-                        .class_definition
-                        .fields
-                        .get(idx)
-                        .map(|fd| fd.id)
-                        .unwrap_or(0);
+                    let def_id = *def_ids.get(idx).unwrap_or(&0);
                     if matches!(field.pointer_target, Some(PointerTarget::ClassName(_))) {
                         let offset_from_class = field.address.saturating_sub(instance.address);
                         let mut header = format!(
@@ -189,9 +283,20 @@ impl ReClassGui {
                             mem_ptr,
                             owner_class_name: instance.class_definition.name.clone(),
                             field_index: idx,
+                            instance_address,
                             address: field.address,
                             value_preview: None,
                         };
+                        // Selection on header click for this field
+                        if collapsing.header_response.clicked() {
+                            self.update_selection_for_click(
+                                ui,
+                                instance_address,
+                                idx,
+                                &def_ids,
+                                def_id,
+                            );
+                        }
                         self.context_menu_for_field(&collapsing.header_response, ctx);
                     } else {
                         let inner = ui.horizontal(|ui| {
@@ -356,16 +461,43 @@ impl ReClassGui {
                             mem_ptr,
                             owner_class_name: instance.class_definition.name.clone(),
                             field_index: idx,
+                            instance_address,
                             address: field.address,
                             value_preview: field_value_string(handle.clone(), field),
                         };
                         let id = ui.id().with(("row_ptr_prim", def_id, path.clone(), idx));
                         let resp = ui.interact(inner.response.rect, id, egui::Sense::click());
+                        // Draw selection highlight
+                        let key = FieldKey {
+                            instance_address,
+                            field_def_id: def_id,
+                        };
+                        if self.selected_fields.contains(&key) {
+                            ui.painter().rect_filled(
+                                inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                                4.0,
+                                Color32::from_white_alpha(18),
+                            );
+                            ui.painter().rect_stroke(
+                                inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                                4.0,
+                                egui::Stroke::new(1.5, Color32::from_rgb(100, 160, 255)),
+                            );
+                        }
                         if resp.hovered() {
                             ui.painter().rect_stroke(
                                 inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
                                 4.0,
                                 egui::Stroke::new(1.0, Color32::from_white_alpha(12)),
+                            );
+                        }
+                        if resp.clicked() {
+                            self.update_selection_for_click(
+                                ui,
+                                instance_address,
+                                idx,
+                                &def_ids,
+                                def_id,
                             );
                         }
                         self.context_menu_for_field(&resp, ctx);
@@ -388,12 +520,7 @@ impl ReClassGui {
                         "0x{:08X}    {}: {}    [ClassInstance]",
                         field.address, fname_display, cname_display
                     );
-                    let def_id = instance
-                        .class_definition
-                        .fields
-                        .get(idx)
-                        .map(|fd| fd.id)
-                        .unwrap_or(0);
+                    let def_id = *def_ids.get(idx).unwrap_or(&0);
                     let collapsing = egui::CollapsingHeader::new(header)
                         .default_open(false)
                         .id_source(("ci_field", def_id, path.clone()))
@@ -505,9 +632,20 @@ impl ReClassGui {
                         mem_ptr,
                         owner_class_name: instance.class_definition.name.clone(),
                         field_index: idx,
+                        instance_address,
                         address: field.address,
                         value_preview: None,
                     };
+                    // Selection on header click for this field
+                    if collapsing.header_response.clicked() {
+                        self.update_selection_for_click(
+                            ui,
+                            instance_address,
+                            idx,
+                            &def_ids,
+                            def_id,
+                        );
+                    }
                     self.context_menu_for_field(&collapsing.header_response, ctx);
                 }
                 _ => {
@@ -624,22 +762,44 @@ impl ReClassGui {
                         mem_ptr,
                         owner_class_name: instance.class_definition.name.clone(),
                         field_index: idx,
+                        instance_address,
                         address: field.address,
                         value_preview: field_value_string(handle.clone(), field),
                     };
-                    let def_id = instance
-                        .class_definition
-                        .fields
-                        .get(idx)
-                        .map(|fd| fd.id)
-                        .unwrap_or(0);
+                    let def_id = *def_ids.get(idx).unwrap_or(&0);
                     let id = ui.id().with(("row_field", def_id, path.clone(), idx));
                     let resp = ui.interact(inner.response.rect, id, egui::Sense::click());
+                    // Draw selection highlight
+                    let key = FieldKey {
+                        instance_address,
+                        field_def_id: def_id,
+                    };
+                    if self.selected_fields.contains(&key) {
+                        ui.painter().rect_filled(
+                            inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                            4.0,
+                            Color32::from_white_alpha(18),
+                        );
+                        ui.painter().rect_stroke(
+                            inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
+                            4.0,
+                            egui::Stroke::new(1.5, Color32::from_rgb(100, 160, 255)),
+                        );
+                    }
                     if resp.hovered() {
                         ui.painter().rect_stroke(
                             inner.response.rect.expand2(egui::vec2(4.0, 2.0)),
                             4.0,
                             egui::Stroke::new(1.0, Color32::from_white_alpha(12)),
+                        );
+                    }
+                    if resp.clicked() {
+                        self.update_selection_for_click(
+                            ui,
+                            instance_address,
+                            idx,
+                            &def_ids,
+                            def_id,
                         );
                     }
                     self.context_menu_for_field(&resp, ctx);

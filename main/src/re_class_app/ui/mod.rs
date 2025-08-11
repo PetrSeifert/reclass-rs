@@ -40,6 +40,10 @@ pub struct ReClassGui {
     enum_window_target: Option<String>,
     enum_value_buffers: std::collections::HashMap<(String, usize), String>,
     bytes_custom_buffer: String,
+    // Selection state: limited to a single class instance at a time
+    selected_instance_address: Option<u64>,
+    selected_fields: std::collections::HashSet<memory_view::FieldKey>,
+    selection_anchor: Option<(u64, usize)>,
 }
 
 impl ReClassGui {
@@ -67,6 +71,9 @@ impl ReClassGui {
             enum_window_target: None,
             enum_value_buffers: std::collections::HashMap::new(),
             bytes_custom_buffer: String::new(),
+            selected_instance_address: None,
+            selected_fields: std::collections::HashSet::new(),
+            selection_anchor: None,
         })
     }
 
