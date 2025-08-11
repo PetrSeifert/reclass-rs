@@ -153,7 +153,7 @@ impl eframe::App for ReClassGui {
                 (names, root_name, referenced, unused, enum_names)
             });
 
-            if let Some((mut names, root_name, _referenced, unused, enum_names)) = snapshot {
+            if let Some((mut names, root_name, referenced, unused, enum_names)) = snapshot {
                 if !self.class_filter.trim().is_empty() {
                     let needle = self.class_filter.to_lowercase();
                     names.retain(|n| n.to_lowercase().contains(&needle));
@@ -185,6 +185,7 @@ impl eframe::App for ReClassGui {
                                 }
                             }
                         }
+                        let can_remove = cname != root_name && !referenced.contains(&cname);
                         resp.context_menu(|ui| {
                             if ui.button("Rename").clicked() {
                                 self.rename_dialog_open = true;
@@ -198,6 +199,17 @@ impl eframe::App for ReClassGui {
                                     if ms_mut.set_root_class_by_name(&cname) {
                                         self.needs_rebuild = true;
                                     }
+                                }
+                                ui.close_menu();
+                            }
+                            let remove_btn = ui.add_enabled(
+                                can_remove,
+                                egui::Button::new("Remove"),
+                            );
+                            if remove_btn.clicked() {
+                                if let Some(ms_mut) = self.app.get_memory_structure_mut() {
+                                    ms_mut.class_registry.remove(&cname);
+                                    self.needs_rebuild = true;
                                 }
                                 ui.close_menu();
                             }
