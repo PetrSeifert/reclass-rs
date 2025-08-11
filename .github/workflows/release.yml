@@ -43,7 +43,7 @@ jobs:
             $subjects = git log --pretty=format:"%s"
           }
           $lines = $subjects -split "`n"
-          $filtered = $lines | Where-Object { $_ -and ($_ -notmatch '^(ci|chore)(\(|:)?') }
+          $filtered = $lines | Where-Object { $_ -and ($_ -notmatch '^(ci|chore|docs)(\(|:)?') }
           if (-not $filtered -or $filtered.Count -eq 0) { $filtered = @('No user-facing changes since last release.') }
           $bulleted = ($filtered | ForEach-Object { "- $_" }) -join "`n"
           if ($lastTag) { $prev = $lastTag } else { $prev = 'initial commit' }
