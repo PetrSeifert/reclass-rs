@@ -26,6 +26,10 @@ static CLASS_DEF_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 fn next_class_def_id() -> u64 {
     CLASS_DEF_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
+static ENUM_DEF_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+fn next_enum_def_id() -> u64 {
+    ENUM_DEF_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Represents a field in a class definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +40,8 @@ pub struct FieldDefinition {
     pub offset: u64,                           // Offset from the start of the class
     pub class_name: Option<String>, // For ClassInstance fields, stores the target class name
     pub pointer_target: Option<PointerTarget>, // For Pointer fields, stores target info
+    pub enum_name: Option<String>,  // For Enum fields, stores the enum name
+    pub enum_size: Option<u8>,      // For Enum fields, underlying size in bytes (1,2,4,8)
 }
 
 impl FieldDefinition {
@@ -48,6 +54,8 @@ impl FieldDefinition {
             offset,
             class_name: None,
             pointer_target: None,
+            enum_name: None,
+            enum_size: None,
         }
     }
 
@@ -60,6 +68,8 @@ impl FieldDefinition {
             offset,
             class_name: None,
             pointer_target: None,
+            enum_name: None,
+            enum_size: None,
         }
     }
 
@@ -71,6 +81,8 @@ impl FieldDefinition {
             offset,
             class_name: None,
             pointer_target: None,
+            enum_name: None,
+            enum_size: None,
         }
     }
 
@@ -185,13 +197,92 @@ impl ClassDefinition {
             if new_type != FieldType::Pointer {
                 f.pointer_target = None;
             }
+            if new_type != FieldType::Enum {
+                f.enum_name = None;
+            }
             if !new_type.is_hex_type() && f.name.is_none() {
-                f.name = Some(format!("var_{}", index));
+                f.name = Some(format!("var_{index}"));
             } else if new_type.is_hex_type() {
                 f.name = None;
             }
             self.recalculate_size();
         }
+    }
+}
+
+/// Represents an enum definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumDefinition {
+    pub id: u64,
+    pub name: String,
+    pub is_flags: bool,
+    pub default_size: u8, // 1,2,4,8 bytes
+    pub variants: Vec<EnumVariant>,
+}
+
+impl EnumDefinition {
+    pub fn new(name: String) -> Self {
+        Self {
+            id: next_enum_def_id(),
+            name,
+            is_flags: false,
+            default_size: 4,
+            variants: Vec::new(),
+        }
+    }
+
+    pub fn rename(&mut self, new_name: String) {
+        self.name = new_name;
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumVariant {
+    pub name: String,
+    pub value: u32,
+}
+
+/// Registry for enum definitions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumDefinitionRegistry {
+    definitions: HashMap<String, EnumDefinition>,
+}
+
+impl EnumDefinitionRegistry {
+    pub fn new() -> Self {
+        Self {
+            definitions: HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, enum_def: EnumDefinition) {
+        self.definitions.insert(enum_def.name.clone(), enum_def);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&EnumDefinition> {
+        self.definitions.get(name)
+    }
+
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut EnumDefinition> {
+        self.definitions.get_mut(name)
+    }
+
+    pub fn contains(&self, name: &str) -> bool {
+        self.definitions.contains_key(name)
+    }
+
+    pub fn get_enum_names(&self) -> Vec<String> {
+        self.definitions.keys().cloned().collect()
+    }
+
+    pub fn remove(&mut self, name: &str) -> Option<EnumDefinition> {
+        self.definitions.remove(name)
+    }
+}
+
+impl Default for EnumDefinitionRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

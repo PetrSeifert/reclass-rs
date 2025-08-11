@@ -47,6 +47,9 @@ pub enum FieldType {
 
     // Generic pointer (64-bit) that can point to any primitive type or class instance
     Pointer,
+
+    // Enum type (32-bit underlying by default)
+    Enum,
 }
 
 impl FieldType {
@@ -66,6 +69,7 @@ impl FieldType {
             FieldType::Text => 32,
             FieldType::TextPointer => 8,
             FieldType::Pointer => 8,
+            FieldType::Enum => 4,
             FieldType::ClassInstance => 0, // Dynamic size
         }
     }
@@ -108,6 +112,7 @@ impl FieldType {
             FieldType::TextPointer => "TextPointer",
             FieldType::ClassInstance => "ClassInstance",
             FieldType::Pointer => "Pointer",
+            FieldType::Enum => "Enum",
         }
     }
 }
@@ -125,4 +130,6 @@ pub enum PointerTarget {
     FieldType(FieldType),
     /// Pointer to a class instance by name
     ClassName(String),
+    /// Pointer to a specific enum definition by name
+    EnumName(String),
 }

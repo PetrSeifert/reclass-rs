@@ -194,13 +194,15 @@ impl ReClassGui {
                         .unwrap_or(0);
                     // If pointer targets a class -> collapsible with nested
                     if matches!(field.pointer_target, Some(PointerTarget::ClassName(_))) {
+                        let offset_from_class = field.address.saturating_sub(instance.address);
                         let mut header = format!(
-                            "0x{:08X}    {}: Pointer",
+                            "+0x{:04X}  0x{:08X}    {}: Pointer",
+                            offset_from_class,
                             field.address,
                             field.name.clone().unwrap_or_default()
                         );
                         if let Some(PointerTarget::ClassName(cn)) = &field.pointer_target {
-                            header.push_str(&format!(" -> {}", cn));
+                            header.push_str(&format!(" -> {cn}"));
                         }
                         if let Some(h) = &handle {
                             if let Ok(ptr) = h.read_sized::<u64>(field.address) {
@@ -281,7 +283,11 @@ impl ReClassGui {
                     } else {
                         // Pointer to primitive -> render simple row (non-collapsible)
                         let inner = ui.horizontal(|ui| {
-                            ui.monospace(format!("0x{:08X}", field.address));
+                            let offset_from_class = field.address.saturating_sub(instance.address);
+                            ui.monospace(format!(
+                                "+0x{:04X}  0x{:08X}",
+                                offset_from_class, field.address
+                            ));
                             if let Some(name) = field.name.clone() {
                                 let def_id = instance
                                     .class_definition
@@ -320,9 +326,51 @@ impl ReClassGui {
                                     Some(PointerTarget::ClassName(cn)) => {
                                         format!(": {} -> {}", field.field_type, cn)
                                     }
+                                    Some(PointerTarget::EnumName(en)) => {
+                                        format!(": {} -> {}", field.field_type, en)
+                                    }
                                     None => format!(": {}", field.field_type),
                                 };
-                                ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
+                                // Inline enum info if applicable
+                                let enum_suffix = if field.field_type == FieldType::Enum {
+                                    if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                        if let Some(fd) = instance
+                                            .class_definition
+                                            .fields
+                                            .iter()
+                                            .find(|fdef| fdef.id == field.def_id)
+                                        {
+                                            if let Some(ref en) = fd.enum_name {
+                                                if let Some(ed) = ms.enum_registry.get(en) {
+                                                    let ty = match ed.default_size {
+                                                        1 => "u8",
+                                                        2 => "u16",
+                                                        8 => "u64",
+                                                        _ => "u32",
+                                                    };
+                                                    format!(
+                                                        " -> {} ({} , {} bytes)",
+                                                        en, ty, ed.default_size
+                                                    )
+                                                } else {
+                                                    String::from(" -> <enum?>")
+                                                }
+                                            } else {
+                                                String::from(" -> <enum?>")
+                                            }
+                                        } else {
+                                            String::new()
+                                        }
+                                    } else {
+                                        String::new()
+                                    }
+                                } else {
+                                    String::new()
+                                };
+                                ui.colored_label(
+                                    Color32::from_rgb(170, 190, 255),
+                                    format!("{type_label}{enum_suffix}"),
+                                );
                             } else {
                                 let type_label = match &field.pointer_target {
                                     Some(PointerTarget::FieldType(t)) => {
@@ -331,15 +379,57 @@ impl ReClassGui {
                                     Some(PointerTarget::ClassName(cn)) => {
                                         format!("{} -> {}", field.field_type, cn)
                                     }
+                                    Some(PointerTarget::EnumName(en)) => {
+                                        format!("{} -> {}", field.field_type, en)
+                                    }
                                     None => format!("{}", field.field_type),
                                 };
-                                ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
+                                // Inline enum info if applicable
+                                let enum_suffix = if field.field_type == FieldType::Enum {
+                                    if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                        if let Some(fd) = instance
+                                            .class_definition
+                                            .fields
+                                            .iter()
+                                            .find(|fdef| fdef.id == field.def_id)
+                                        {
+                                            if let Some(ref en) = fd.enum_name {
+                                                if let Some(ed) = ms.enum_registry.get(en) {
+                                                    let ty = match ed.default_size {
+                                                        1 => "u8",
+                                                        2 => "u16",
+                                                        8 => "u64",
+                                                        _ => "u32",
+                                                    };
+                                                    format!(
+                                                        " -> {} ({} , {} bytes)",
+                                                        en, ty, ed.default_size
+                                                    )
+                                                } else {
+                                                    String::from(" -> <enum?>")
+                                                }
+                                            } else {
+                                                String::from(" -> <enum?>")
+                                            }
+                                        } else {
+                                            String::new()
+                                        }
+                                    } else {
+                                        String::new()
+                                    }
+                                } else {
+                                    String::new()
+                                };
+                                ui.colored_label(
+                                    Color32::from_rgb(170, 190, 255),
+                                    format!("{type_label}{enum_suffix}"),
+                                );
                             }
                             ui.label(
                                 RichText::new(format!(" ({} bytes)", field.get_size())).weak(),
                             );
                             if let Some(val) = field_value_string(handle.clone(), field) {
-                                ui.monospace(format!("= {}", val));
+                                ui.monospace(format!("= {val}"));
                             }
                         });
                         let row_bg = if idx % 2 == 0 {
@@ -472,8 +562,7 @@ impl ReClassGui {
                                         ) {
                                             self.class_type_buffers.remove(&tkey);
                                             self.cycle_error_text = format!(
-                                                "Changing '{}' -> '{}' would create a class cycle.",
-                                                current_type, selected
+                                                "Changing '{current_type}' -> '{selected}' would create a class cycle."
                                             );
                                             self.cycle_error_open = true;
                                         } else if !ms.class_registry.contains(&selected) {
@@ -513,7 +602,11 @@ impl ReClassGui {
                 }
                 _ => {
                     let inner = ui.horizontal(|ui| {
-                        ui.monospace(format!("0x{:08X}", field.address));
+                        let offset_from_class = field.address.saturating_sub(instance.address);
+                        ui.monospace(format!(
+                            "+0x{:04X}  0x{:08X}",
+                            offset_from_class, field.address
+                        ));
                         if let Some(name) = field.name.clone() {
                             let def_id = instance
                                 .class_definition
@@ -545,19 +638,69 @@ impl ReClassGui {
                                 }
                                 self.field_name_buffers.remove(&key);
                             }
+                            // Unified enum suffix for name-present case
+                            let enum_suffix = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                enum_suffix_for_field(&instance.class_definition, field, ms)
+                            } else {
+                                String::new()
+                            };
                             ui.colored_label(
                                 Color32::from_rgb(170, 190, 255),
-                                format!(": {}", field.field_type),
+                                format!(": {}{}", field.field_type, enum_suffix),
                             );
                         } else {
+                            let enum_suffix = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                enum_suffix_for_field(&instance.class_definition, field, ms)
+                            } else {
+                                String::new()
+                            };
                             ui.colored_label(
                                 Color32::from_rgb(170, 190, 255),
-                                format!("{}", field.field_type),
+                                format!("{}{}", field.field_type, enum_suffix),
                             );
                         }
-                        ui.label(RichText::new(format!(" ({} bytes)", field.get_size())).weak());
-                        if let Some(val) = field_value_string(handle.clone(), field) {
-                            ui.monospace(format!("= {}", val));
+                        // Show size: for enums, use enum default_size instead of FieldType::get_size
+                        let display_size: u64 = if field.field_type == FieldType::Enum {
+                            if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                if let Some(fd) = instance
+                                    .class_definition
+                                    .fields
+                                    .iter()
+                                    .find(|fdef| fdef.id == field.def_id)
+                                {
+                                    if let Some(ref en) = fd.enum_name {
+                                        if let Some(ed) = ms.enum_registry.get(en) {
+                                            ed.default_size as u64
+                                        } else {
+                                            field.get_size()
+                                        }
+                                    } else {
+                                        field.get_size()
+                                    }
+                                } else {
+                                    field.get_size()
+                                }
+                            } else {
+                                field.get_size()
+                            }
+                        } else {
+                            field.get_size()
+                        };
+                        ui.label(RichText::new(format!(" ({display_size} bytes)")).weak());
+                        let value_str = if field.field_type == FieldType::Enum {
+                            if let (Some(h), Some(ms)) =
+                                (handle.as_ref(), unsafe { (mem_ptr).as_ref() })
+                            {
+                                // Avoid borrowing entire instance; pass what we need
+                                enum_value_string(h, &instance.class_definition, field, ms)
+                            } else {
+                                None
+                            }
+                        } else {
+                            field_value_string(handle.clone(), field)
+                        };
+                        if let Some(val) = value_str {
+                            ui.monospace(format!("= {val}"));
                         }
                     });
                     let row_bg = if idx % 2 == 0 {
@@ -612,22 +755,93 @@ impl ReClassGui {
                 }
             }
             ui.separator();
-            if ui.button("Add Hex64 at end").clicked() {
-                let ms = unsafe { &mut *ctx.mem_ptr };
-                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                    def.add_hex_field(FieldType::Hex64);
-                    self.schedule_rebuild();
+            ui.menu_button("Add bytes at end", |ui| {
+                if ui.button("4 bytes").clicked() {
+                    self.add_n_bytes_at_end(&ctx, 4);
+                    ui.close_menu();
                 }
-                ui.close_menu();
-            }
-            if ui.button("Insert Hex64 here").clicked() {
-                let ms = unsafe { &mut *ctx.mem_ptr };
-                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                    def.insert_hex_field_at(ctx.field_index, FieldType::Hex64);
-                    self.schedule_rebuild();
+                if ui.button("8 bytes").clicked() {
+                    self.add_n_bytes_at_end(&ctx, 8);
+                    ui.close_menu();
                 }
-                ui.close_menu();
-            }
+                if ui.button("64 bytes").clicked() {
+                    self.add_n_bytes_at_end(&ctx, 64);
+                    ui.close_menu();
+                }
+                if ui.button("256 bytes").clicked() {
+                    self.add_n_bytes_at_end(&ctx, 256);
+                    ui.close_menu();
+                }
+                if ui.button("1024 bytes").clicked() {
+                    self.add_n_bytes_at_end(&ctx, 1024);
+                    ui.close_menu();
+                }
+                if ui.button("2048 bytes").clicked() {
+                    self.add_n_bytes_at_end(&ctx, 2048);
+                    ui.close_menu();
+                }
+                if ui.button("4096 bytes").clicked() {
+                    self.add_n_bytes_at_end(&ctx, 4096);
+                    ui.close_menu();
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Custom:");
+                    let buf = &mut self.bytes_custom_buffer;
+                    ui.text_edit_singleline(buf);
+                    if ui.button("Add").clicked() {
+                        if let Ok(n) = buf.trim().parse::<u64>() {
+                            self.add_n_bytes_at_end(&ctx, n as usize);
+                            self.bytes_custom_buffer.clear();
+                            ui.close_menu();
+                        }
+                    }
+                });
+            });
+
+            ui.menu_button("Insert bytes here", |ui| {
+                if ui.button("4 bytes").clicked() {
+                    self.insert_n_bytes_here(&ctx, 4);
+                    ui.close_menu();
+                }
+                if ui.button("8 bytes").clicked() {
+                    self.insert_n_bytes_here(&ctx, 8);
+                    ui.close_menu();
+                }
+                if ui.button("64 bytes").clicked() {
+                    self.insert_n_bytes_here(&ctx, 64);
+                    ui.close_menu();
+                }
+                if ui.button("256 bytes").clicked() {
+                    self.insert_n_bytes_here(&ctx, 256);
+                    ui.close_menu();
+                }
+                if ui.button("1024 bytes").clicked() {
+                    self.insert_n_bytes_here(&ctx, 1024);
+                    ui.close_menu();
+                }
+                if ui.button("2048 bytes").clicked() {
+                    self.insert_n_bytes_here(&ctx, 2048);
+                    ui.close_menu();
+                }
+                if ui.button("4096 bytes").clicked() {
+                    self.insert_n_bytes_here(&ctx, 4096);
+                    ui.close_menu();
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Custom:");
+                    let buf = &mut self.bytes_custom_buffer;
+                    ui.text_edit_singleline(buf);
+                    if ui.button("Insert").clicked() {
+                        if let Ok(n) = buf.trim().parse::<u64>() {
+                            self.insert_n_bytes_here(&ctx, n as usize);
+                            self.bytes_custom_buffer.clear();
+                            ui.close_menu();
+                        }
+                    }
+                });
+            });
             {
                 let can_remove = unsafe {
                     (*ctx.mem_ptr)
@@ -665,8 +879,9 @@ impl ReClassGui {
                     FieldType::Double,
                     FieldType::TextPointer,
                     FieldType::Pointer,
+                    FieldType::Enum,
                 ] {
-                    let label = format!("{:?}", t);
+                    let label = format!("{t:?}");
                     if ui.button(label).clicked() {
                         let ms = unsafe { &mut *ctx.mem_ptr };
                         if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
@@ -676,6 +891,17 @@ impl ReClassGui {
                                     fd.pointer_target =
                                         Some(PointerTarget::FieldType(FieldType::Hex64));
                                 }
+                            } else if t == FieldType::Enum {
+                                if let Some(fd) = def.fields.get_mut(ctx.field_index) {
+                                    // Assign a default enum if any exists
+                                    let names =
+                                        unsafe { (*ctx.mem_ptr).enum_registry.get_enum_names() };
+                                    if let Some(first) = names.into_iter().next() {
+                                        fd.enum_name = Some(first);
+                                    } else {
+                                        fd.enum_name = None;
+                                    }
+                                }
                             }
                             self.schedule_rebuild();
                         }
@@ -683,6 +909,37 @@ impl ReClassGui {
                     }
                 }
             });
+
+            // If enum, allow choosing enum definition (size is defined on enum, not per-field)
+            if let Some(ms) = unsafe { (ctx.mem_ptr).as_mut() } {
+                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                    if let Some(fd) = def.fields.get_mut(ctx.field_index) {
+                        if fd.field_type == FieldType::Enum {
+                            ui.separator();
+                            ui.label("Enum:");
+                            let mut current =
+                                fd.enum_name.clone().unwrap_or_else(|| "<none>".to_string());
+                            egui::ComboBox::from_id_source((
+                                "enum_combo",
+                                ctx.owner_class_name.clone(),
+                                ctx.field_index,
+                            ))
+                            .selected_text(current.clone())
+                            .show_ui(ui, |ui| {
+                                for n in ms.enum_registry.get_enum_names() {
+                                    ui.selectable_value(&mut current, n.clone(), n);
+                                }
+                            });
+                            if fd.enum_name.as_deref() != Some(&current)
+                                && ms.enum_registry.contains(&current)
+                            {
+                                fd.enum_name = Some(current);
+                                self.schedule_rebuild();
+                            }
+                        }
+                    }
+                }
+            }
 
             // Pointer target configuration menu
             if let Some(ms) = unsafe { (ctx.mem_ptr).as_mut() } {
@@ -712,8 +969,9 @@ impl ReClassGui {
                                         FieldType::Vector4,
                                         FieldType::Text,
                                         FieldType::TextPointer,
+                                        FieldType::Enum,
                                     ] {
-                                        let label = format!("{:?}", t);
+                                        let label = format!("{t:?}");
                                         if ui.button(label).clicked() {
                                             let ms = unsafe { &mut *ctx.mem_ptr };
                                             if let Some(defm) =
@@ -722,11 +980,52 @@ impl ReClassGui {
                                                 if let Some(fdm) =
                                                     defm.fields.get_mut(ctx.field_index)
                                                 {
-                                                    fdm.pointer_target =
-                                                        Some(PointerTarget::FieldType(t));
+                                                    if t == FieldType::Enum {
+                                                        let names = unsafe {
+                                                            (*ctx.mem_ptr)
+                                                                .enum_registry
+                                                                .get_enum_names()
+                                                        };
+                                                        if let Some(first) =
+                                                            names.into_iter().next()
+                                                        {
+                                                            fdm.pointer_target = Some(
+                                                                PointerTarget::EnumName(first),
+                                                            );
+                                                        } else {
+                                                            fdm.pointer_target =
+                                                                Some(PointerTarget::FieldType(
+                                                                    FieldType::UInt32,
+                                                                ));
+                                                        }
+                                                    } else {
+                                                        fdm.pointer_target =
+                                                            Some(PointerTarget::FieldType(t));
+                                                    }
                                                 }
                                                 self.schedule_rebuild();
                                             }
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+                                ui.menu_button("Enum", |ui| {
+                                    let names =
+                                        unsafe { (*ctx.mem_ptr).enum_registry.get_enum_names() };
+                                    for name in names {
+                                        if ui.button(name.clone()).clicked() {
+                                            let ms = unsafe { &mut *ctx.mem_ptr };
+                                            if let Some(defm) =
+                                                ms.class_registry.get_mut(&ctx.owner_class_name)
+                                            {
+                                                if let Some(fdm) =
+                                                    defm.fields.get_mut(ctx.field_index)
+                                                {
+                                                    fdm.pointer_target =
+                                                        Some(PointerTarget::EnumName(name));
+                                                }
+                                            }
+                                            self.schedule_rebuild();
                                             ui.close_menu();
                                         }
                                     }
@@ -799,6 +1098,67 @@ impl ReClassGui {
             }
         });
     }
+
+    fn add_n_bytes_at_end(&mut self, ctx: &FieldCtx, num_bytes: usize) {
+        if num_bytes == 0 {
+            return;
+        }
+        let ms = unsafe { &mut *ctx.mem_ptr };
+        if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+            let mut remaining = num_bytes;
+            // Chunk into largest hex fields to minimize count
+            while remaining >= 8 {
+                def.add_hex_field(FieldType::Hex64);
+                remaining -= 8;
+            }
+            while remaining >= 4 {
+                def.add_hex_field(FieldType::Hex32);
+                remaining -= 4;
+            }
+            while remaining >= 2 {
+                def.add_hex_field(FieldType::Hex16);
+                remaining -= 2;
+            }
+            while remaining > 0 {
+                def.add_hex_field(FieldType::Hex8);
+                remaining -= 1;
+            }
+            self.schedule_rebuild();
+        }
+    }
+
+    fn insert_n_bytes_here(&mut self, ctx: &FieldCtx, num_bytes: usize) {
+        if num_bytes == 0 {
+            return;
+        }
+        let ms = unsafe { &mut *ctx.mem_ptr };
+        if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+            let mut remaining = num_bytes;
+            let mut insert_index = ctx.field_index;
+            // Insert before current field, largest first to maintain order of chunks
+            while remaining >= 8 {
+                def.insert_hex_field_at(insert_index, FieldType::Hex64);
+                insert_index += 1;
+                remaining -= 8;
+            }
+            while remaining >= 4 {
+                def.insert_hex_field_at(insert_index, FieldType::Hex32);
+                insert_index += 1;
+                remaining -= 4;
+            }
+            while remaining >= 2 {
+                def.insert_hex_field_at(insert_index, FieldType::Hex16);
+                insert_index += 1;
+                remaining -= 2;
+            }
+            while remaining > 0 {
+                def.insert_hex_field_at(insert_index, FieldType::Hex8);
+                insert_index += 1;
+                remaining -= 1;
+            }
+            self.schedule_rebuild();
+        }
+    }
 }
 
 fn generate_unique_class_name(registry: &ClassDefinitionRegistry, base: &str) -> String {
@@ -807,7 +1167,7 @@ fn generate_unique_class_name(registry: &ClassDefinitionRegistry, base: &str) ->
     }
     let mut counter: usize = 1;
     loop {
-        let candidate = format!("{}_{}", base, counter);
+        let candidate = format!("{base}_{counter}");
         if !registry.contains(&candidate) {
             return candidate;
         }
@@ -886,7 +1246,7 @@ fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Op
             let mut buf = vec![0u8; len];
             (handle.read_slice(addr, buf.as_mut_slice()).ok()).map(|_| {
                 buf.iter()
-                    .map(|b| format!("{:02X}", b))
+                    .map(|b| format!("{b:02X}"))
                     .collect::<Vec<_>>()
                     .join(" ")
             })
@@ -910,7 +1270,7 @@ fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Op
             let addr_str = format!("-> 0x{ptr:016X}");
             if let Some(PointerTarget::FieldType(ref t)) = field.pointer_target {
                 if let Some(val) = read_value_preview_for_type(handle, t, ptr) {
-                    Some(format!("{} = {}", addr_str, val))
+                    Some(format!("{addr_str} = {val}"))
                 } else {
                     Some(addr_str)
                 }
@@ -920,6 +1280,72 @@ fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Op
         }
 
         FieldType::ClassInstance => None,
+        FieldType::Enum => None,
+    }
+}
+
+fn enum_value_string(
+    handle: &AppHandle,
+    class_def: &ClassDefinition,
+    field: &MemoryField,
+    memory: &MemoryStructure,
+) -> Option<String> {
+    let def = class_def.fields.iter().find(|fd| fd.id == field.def_id)?;
+    let ename = def.enum_name.as_ref()?;
+    let edef = memory.enum_registry.get(ename)?;
+    let size = edef.default_size;
+    // Read numeric value according to enum's underlying size
+    let (val_u64, val_str) = match size {
+        1 => {
+            let v = handle.read_sized::<u8>(field.address).ok()? as u64;
+            (v, v.to_string())
+        }
+        2 => {
+            let v = handle.read_sized::<u16>(field.address).ok()? as u64;
+            (v, v.to_string())
+        }
+        8 => {
+            let v = handle.read_sized::<u64>(field.address).ok()?;
+            (v, v.to_string())
+        }
+        _ => {
+            let v = handle.read_sized::<u32>(field.address).ok()? as u64;
+            (v, v.to_string())
+        }
+    };
+
+    // Prefer named variant when available; otherwise fall back to numeric value
+    if let Some(variant) = edef
+        .variants
+        .iter()
+        .find(|variant| (variant.value as u64) == val_u64)
+    {
+        Some(variant.name.clone())
+    } else {
+        Some(val_str)
+    }
+}
+
+fn enum_suffix_for_field(
+    class_def: &ClassDefinition,
+    field: &MemoryField,
+    memory: &MemoryStructure,
+) -> String {
+    if field.field_type != FieldType::Enum {
+        return String::new();
+    }
+    let def = match class_def.fields.iter().find(|fd| fd.id == field.def_id) {
+        Some(d) => d,
+        None => return String::new(),
+    };
+    let en = match &def.enum_name {
+        Some(n) => n,
+        None => return String::from(" -> <enum?>"),
+    };
+    if let Some(_ed) = memory.enum_registry.get(en) {
+        format!(" -> {en}")
+    } else {
+        String::from(" -> <enum?>")
     }
 }
 
@@ -967,7 +1393,7 @@ fn read_value_preview_for_type(handle: &AppHandle, t: &FieldType, addr: u64) -> 
             let mut buf = vec![0u8; len];
             (handle.read_slice(addr, buf.as_mut_slice()).ok()).map(|_| {
                 buf.iter()
-                    .map(|b| format!("{:02X}", b))
+                    .map(|b| format!("{b:02X}"))
                     .collect::<Vec<_>>()
                     .join(" ")
             })
@@ -988,5 +1414,6 @@ fn read_value_preview_for_type(handle: &AppHandle, t: &FieldType, addr: u64) -> 
 
         // For nested types that shouldn't appear here
         FieldType::ClassInstance | FieldType::Pointer => None,
+        FieldType::Enum => handle.read_sized::<u32>(addr).ok().map(|v| v.to_string()),
     }
 }
