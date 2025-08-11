@@ -69,29 +69,28 @@ impl ReClassGui {
             fn parse_number(&mut self) -> Option<u64> {
                 self.skip_ws();
                 let start = self.i;
-                if self.peek() == Some(b'0') {
-                    if self
+                if self.peek() == Some(b'0')
+                    && self
                         .s
                         .get(self.i + 1)
                         .copied()
                         .map(|c| c == b'x' || c == b'X')
                         .unwrap_or(false)
-                    {
-                        self.i += 2;
-                        let hex_start = self.i;
-                        while let Some(b) = self.peek() {
-                            if (b as char).is_ascii_hexdigit() {
-                                self.bump();
-                            } else {
-                                break;
-                            }
+                {
+                    self.i += 2;
+                    let hex_start = self.i;
+                    while let Some(b) = self.peek() {
+                        if (b as char).is_ascii_hexdigit() {
+                            self.bump();
+                        } else {
+                            break;
                         }
-                        if self.i == hex_start {
-                            return None;
-                        }
-                        let txt = std::str::from_utf8(&self.s[hex_start..self.i]).ok()?;
-                        return u64::from_str_radix(txt, 16).ok();
                     }
+                    if self.i == hex_start {
+                        return None;
+                    }
+                    let txt = std::str::from_utf8(&self.s[hex_start..self.i]).ok()?;
+                    return u64::from_str_radix(txt, 16).ok();
                 }
                 while let Some(b) = self.peek() {
                     if (b as char).is_ascii_digit() {

@@ -116,6 +116,3 @@ pub fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -
     }
 }
 
-pub fn parse_hex(s: &str) -> Option<u64> {
-    parse_hex_u64(s)
-}

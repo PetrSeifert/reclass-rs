@@ -221,11 +221,12 @@ impl ReClassGui {
                                         let ms = unsafe { &mut *mem_ptr };
                                         if let Some(class_def) = ms.class_registry.get(cn).cloned()
                                         {
-                                            let nested = ClassInstance::new(
+                                            let mut nested = ClassInstance::new(
                                                 field.name.clone().unwrap_or_default(),
                                                 ptr,
                                                 class_def,
                                             );
+                                            ms.bind_nested_for_instance(&mut nested);
                                             field.nested_instance = Some(nested);
                                         } else {
                                             field.nested_instance = None;

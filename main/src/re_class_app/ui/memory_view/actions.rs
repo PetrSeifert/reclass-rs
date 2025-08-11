@@ -12,7 +12,7 @@ use crate::{
 };
 
 impl ReClassGui {
-    pub(crate) fn add_n_bytes_at_end(&mut self, ctx: &FieldCtx, num_bytes: usize) {
+    pub(super) fn add_n_bytes_at_end(&mut self, ctx: &FieldCtx, num_bytes: usize) {
         if num_bytes == 0 {
             return;
         }
@@ -40,7 +40,7 @@ impl ReClassGui {
         }
     }
 
-    pub(crate) fn insert_n_bytes_here(&mut self, ctx: &FieldCtx, num_bytes: usize) {
+    pub(super) fn insert_n_bytes_here(&mut self, ctx: &FieldCtx, num_bytes: usize) {
         if num_bytes == 0 {
             return;
         }
@@ -73,7 +73,7 @@ impl ReClassGui {
         }
     }
 
-    pub(crate) fn remove_selected_fields(
+    pub(super) fn remove_selected_fields(
         &mut self,
         mem_ptr: *mut MemoryStructure,
         owner_class_name: &str,
@@ -116,7 +116,7 @@ impl ReClassGui {
         }
     }
 
-    pub(crate) fn change_selected_fields_type(
+    pub(super) fn change_selected_fields_type(
         &mut self,
         mem_ptr: *mut MemoryStructure,
         owner_class_name: &str,
@@ -159,7 +159,7 @@ impl ReClassGui {
         }
     }
 
-    pub(crate) fn create_class_instances_for_selected(
+    pub(super) fn create_class_instances_for_selected(
         &mut self,
         mem_ptr: *mut MemoryStructure,
         owner_class_name: &str,

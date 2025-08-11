@@ -377,6 +377,12 @@ impl MemoryStructure {
         Self::recalc_instance_layout(&self.enum_registry, &mut self.root_class);
     }
 
+    pub fn bind_nested_for_instance(&self, instance: &mut ClassInstance) {
+        let registry = self.class_registry.clone();
+        Self::build_nested_for_instance(&registry, instance);
+        Self::recalc_instance_layout(&self.enum_registry, instance);
+    }
+
     pub fn rebuild_root_from_registry(&mut self) {
         let root_type = self.root_class.class_definition.name.clone();
         if let Some(def) = self.class_registry.get(&root_type).cloned() {
