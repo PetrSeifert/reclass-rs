@@ -115,4 +115,3 @@ pub fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -
         FieldType::Enum => None,
     }
 }
-

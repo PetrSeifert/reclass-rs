@@ -64,18 +64,36 @@ impl ReClassGui {
     }
 
     pub(super) fn modules_window(&mut self, ctx: &Context) {
+        let selected_pid = self
+            .app
+            .process_state
+            .selected_process
+            .as_ref()
+            .map(|p| p.process_id);
+
         egui::Window::new("Modules")
             .open(&mut self.modules_window_open)
             .resizable(true)
             .show(ctx, |ui| {
-                if let Some(proc_) = &self.app.process_state.selected_process {
-                    if ui.button("Refresh").clicked() {
-                        let _ = self.app.fetch_modules(proc_.process_id);
-                    }
+                if let Some(pid) = selected_pid {
+                    ui.horizontal(|ui| {
+                        ui.label("Filter:");
+                        ui.text_edit_singleline(&mut self.modules_filter);
+                        if ui.button("Clear").clicked() {
+                            self.modules_filter.clear();
+                        }
+                        if ui.button("Refresh").clicked() {
+                            let _ = self.app.fetch_modules(pid);
+                        }
+                    });
                     ui.separator();
                     ScrollArea::vertical().show(ui, |ui| {
+                        let needle = self.modules_filter.to_lowercase();
                         for m in self.app.get_modules() {
                             let name = m.get_base_dll_name().unwrap_or("Unknown");
+                            if !needle.is_empty() && !name.to_lowercase().contains(&needle) {
+                                continue;
+                            }
                             ui.label(format!(
                                 "{} @ 0x{:X} ({} KB)",
                                 name,
