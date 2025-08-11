@@ -13,7 +13,7 @@ use eframe::egui::{
 use super::ReClassApp;
 
 mod header;
-mod memory_view;
+pub mod memory_view;
 mod process;
 mod theme;
 
