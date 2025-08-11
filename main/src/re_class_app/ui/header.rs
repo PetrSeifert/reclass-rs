@@ -37,6 +37,13 @@ impl ReClassGui {
                     let _ = self.app.fetch_modules(selected.process_id);
                     self.modules_window_open = true;
                 }
+                if ui
+                    .add(egui::Button::new("Signatures").min_size(egui::vec2(100.0, 0.0)))
+                    .on_hover_text("Define and resolve signatures to entry offsets")
+                    .clicked()
+                {
+                    self.signatures_window_open = true;
+                }
             } else {
                 ui.label(
                     RichText::new("Not attached")

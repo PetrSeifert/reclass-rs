@@ -15,6 +15,7 @@ use super::ReClassApp;
 mod header;
 pub mod memory_view;
 mod process;
+mod signatures;
 mod theme;
 
 pub struct ReClassGui {
@@ -23,6 +24,7 @@ pub struct ReClassGui {
     process_filter: String,
     modules_window_open: bool,
     modules_filter: String,
+    signatures_window_open: bool,
     needs_rebuild: bool,
     field_name_buffers: std::collections::HashMap<memory_view::FieldKey, String>,
     class_type_buffers: std::collections::HashMap<memory_view::FieldKey, String>,
@@ -55,6 +57,7 @@ impl ReClassGui {
             process_filter: String::new(),
             modules_window_open: false,
             modules_filter: String::new(),
+            signatures_window_open: false,
             needs_rebuild: false,
             field_name_buffers: std::collections::HashMap::new(),
             class_type_buffers: std::collections::HashMap::new(),
@@ -541,6 +544,9 @@ impl eframe::App for ReClassGui {
         }
         if self.modules_window_open {
             self.modules_window(ctx);
+        }
+        if self.signatures_window_open {
+            self.signatures_window(ctx);
         }
     }
 }

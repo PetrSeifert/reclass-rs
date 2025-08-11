@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
 use handle::AppHandle;
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use vtd_libum::{
     protocol::types::{
         DirectoryTableType,
@@ -12,6 +16,24 @@ use vtd_libum::{
 };
 
 use crate::memory::MemoryStructure;
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct AppSignature {
+    pub name: String,
+    pub module: String,
+    pub pattern: String,
+    pub offset: u64,
+    pub is_relative: bool,
+    pub rel_inst_len: u64,
+    #[serde(skip)]
+    pub offset_buf: String,
+    #[serde(skip)]
+    pub rel_inst_len_buf: String,
+    #[serde(skip)]
+    pub last_value: Option<u64>,
+    #[serde(skip)]
+    pub last_error: Option<String>,
+}
 
 pub struct ProcessState {
     pub processes: Vec<ProcessInfo>,
@@ -34,6 +56,7 @@ pub struct ReClassApp {
     pub handle: Option<Arc<AppHandle>>,
     pub process_state: ProcessState,
     pub memory_structure: Option<MemoryStructure>,
+    pub signatures: Vec<AppSignature>,
 }
 
 impl ReClassApp {
@@ -49,6 +72,7 @@ impl ReClassApp {
             handle: None,
             process_state: ProcessState::new(),
             memory_structure: None,
+            signatures: Vec::new(),
         })
     }
 
@@ -98,6 +122,27 @@ impl ReClassApp {
 
     pub fn get_memory_structure_mut(&mut self) -> Option<&mut MemoryStructure> {
         self.memory_structure.as_mut()
+    }
+
+    pub fn get_signatures_mut(&mut self) -> &mut Vec<AppSignature> {
+        &mut self.signatures
+    }
+
+    pub fn resolve_signature_by_name(&self, name: &str) -> Option<u64> {
+        let sig = self
+            .signatures
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(name))?;
+        let handle = self.handle.as_ref()?;
+        // Validate pattern first to avoid panic inside constructors
+        let sanitized = sig.pattern.split_whitespace().collect::<Vec<_>>().join(" ");
+        handle::ByteSequencePattern::parse(&sanitized)?;
+        let sig_def = if sig.is_relative {
+            handle::Signature::relative_address(&sig.name, &sanitized, sig.offset, sig.rel_inst_len)
+        } else {
+            handle::Signature::offset(&sig.name, &sanitized, sig.offset)
+        };
+        handle.resolve_signature(&sig.module, &sig_def).ok()
     }
 }
 

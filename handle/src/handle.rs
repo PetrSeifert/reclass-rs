@@ -47,7 +47,7 @@ impl MemoryView for AppMemoryView {
         buffer: &mut [u8],
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let Some(handle) = self.handle.upgrade() else {
-            return Err(anyhow::anyhow!("Pubg handle gone").into());
+            return Err(anyhow::anyhow!("handle gone").into());
         };
 
         Ok(handle.read_slice(offset, buffer)?)
@@ -76,12 +76,13 @@ impl AppHandle {
             process_id
         );
 
-        let handle = Arc::new(Self {
-            weak_self: Weak::new(),
+        let ke_interface = interface;
+        let handle = Arc::new_cyclic(|weak| Self {
+            weak_self: weak.clone(),
             metrics: false,
             modules,
             process_id,
-            ke_interface: interface,
+            ke_interface,
         });
 
         Ok(handle)

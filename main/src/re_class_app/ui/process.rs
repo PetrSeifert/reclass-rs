@@ -89,7 +89,13 @@ impl ReClassGui {
                     ui.separator();
                     ScrollArea::vertical().show(ui, |ui| {
                         let needle = self.modules_filter.to_lowercase();
-                        for m in self.app.get_modules() {
+                        let mut modules = self.app.get_modules().clone();
+                        modules.sort_by_key(|m| {
+                            m.get_base_dll_name()
+                                .unwrap_or("Unknown")
+                                .to_ascii_lowercase()
+                        });
+                        for m in &modules {
                             let name = m.get_base_dll_name().unwrap_or("Unknown");
                             if !needle.is_empty() && !name.to_lowercase().contains(&needle) {
                                 continue;

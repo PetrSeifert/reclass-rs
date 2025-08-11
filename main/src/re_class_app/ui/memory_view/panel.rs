@@ -24,7 +24,7 @@ use crate::{
 impl ReClassGui {
     fn eval_address_expr(&self, input: &str) -> Option<u64> {
         // Simple recursive-descent parser supporting:
-        // numbers (hex 0x.. or decimal), <module.dll>, +, -, parentheses (), deref [expr]
+        // numbers (hex 0x.. or decimal), <module.dll>, $SignatureName, +, -, parentheses (), deref [expr]
         struct Parser<'a> {
             s: &'a [u8],
             i: usize,
@@ -64,6 +64,33 @@ impl ReClassGui {
                 } else {
                     false
                 }
+            }
+
+            fn parse_ident(&mut self) -> Option<&'a str> {
+                self.skip_ws();
+                let start = self.i;
+                while let Some(b) = self.peek() {
+                    let c = b as char;
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+                if self.i > start {
+                    std::str::from_utf8(&self.s[start..self.i]).ok()
+                } else {
+                    None
+                }
+            }
+
+            fn parse_signature_ref(&mut self) -> Option<u64> {
+                self.skip_ws();
+                if !self.consume(b'$') {
+                    return None;
+                }
+                let name = self.parse_ident()?;
+                self.gui.app.resolve_signature_by_name(name)
             }
 
             fn parse_number(&mut self) -> Option<u64> {
@@ -163,6 +190,10 @@ impl ReClassGui {
                 if let Some(v) = self.parse_module_ref() {
                     return Some(v);
                 }
+                // Signature ref
+                if let Some(v) = self.parse_signature_ref() {
+                    return Some(v);
+                }
                 // Number
                 self.parse_number()
             }
@@ -211,7 +242,22 @@ impl ReClassGui {
                         .pick_file()
                     {
                         if let Ok(text) = std::fs::read_to_string(&path) {
-                            if let Ok(mut ms) = serde_json::from_str::<MemoryStructure>(&text) {
+                            // Expect a wrapper with memory and signatures
+                            #[derive(serde::Deserialize)]
+                            struct AppSave {
+                                memory: MemoryStructure,
+                                #[serde(default)]
+                                signatures: Vec<crate::re_class_app::app::AppSignature>,
+                            }
+                            if let Ok(mut wrapper) = serde_json::from_str::<AppSave>(&text) {
+                                wrapper.memory.class_registry.normalize_ids();
+                                wrapper.memory.create_nested_instances();
+                                self.app.set_memory_structure(wrapper.memory);
+                                self.app.signatures = wrapper.signatures;
+                            } else if let Ok(mut ms) =
+                                serde_json::from_str::<MemoryStructure>(&text)
+                            {
+                                // Back-compat: old files with just MemoryStructure
                                 ms.class_registry.normalize_ids();
                                 ms.create_nested_instances();
                                 self.app.set_memory_structure(ms);
@@ -229,7 +275,16 @@ impl ReClassGui {
                             .set_file_name("memory_structure.json")
                             .save_file()
                         {
-                            if let Ok(text) = serde_json::to_string_pretty(ms) {
+                            #[derive(serde::Serialize)]
+                            struct AppSave<'a> {
+                                memory: &'a MemoryStructure,
+                                signatures: &'a Vec<crate::re_class_app::app::AppSignature>,
+                            }
+                            let wrapper = AppSave {
+                                memory: ms,
+                                signatures: &self.app.signatures,
+                            };
+                            if let Ok(text) = serde_json::to_string_pretty(&wrapper) {
                                 let _ = std::fs::write(path, text);
                             }
                         }

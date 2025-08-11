@@ -99,6 +99,8 @@ pub struct ClassDefinition {
     pub name: String,
     pub fields: Vec<FieldDefinition>,
     pub total_size: u64,
+    #[serde(default)]
+    pub entry_offset: Option<u64>,
 }
 
 impl ClassDefinition {
@@ -108,6 +110,7 @@ impl ClassDefinition {
             name,
             fields: Vec::new(),
             total_size: 0,
+            entry_offset: None,
         }
     }
 
