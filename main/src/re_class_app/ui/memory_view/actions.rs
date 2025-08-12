@@ -17,7 +17,7 @@ impl ReClassGui {
             return;
         }
         if let Some(ms) = self.app.get_memory_structure_mut() {
-            if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+            if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                 let mut remaining = num_bytes;
                 while remaining >= 8 {
                     def.add_hex_field(FieldType::Hex64);
@@ -45,7 +45,7 @@ impl ReClassGui {
             return;
         }
         if let Some(ms) = self.app.get_memory_structure_mut() {
-            if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+            if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                 let mut remaining = num_bytes;
                 let mut insert_index = ctx.field_index;
                 while remaining >= 8 {
@@ -76,14 +76,14 @@ impl ReClassGui {
     pub(super) fn remove_selected_fields(
         &mut self,
         mem_ptr: *mut MemoryStructure,
-        owner_class_name: &str,
+        owner_class_id: u64,
         selected_field_ids: &HashSet<u64>,
     ) {
         if selected_field_ids.is_empty() {
             return;
         }
         let ms = unsafe { &mut *mem_ptr };
-        if let Some(def) = ms.class_registry.get_mut(owner_class_name) {
+        if let Some(def) = ms.class_registry.get_mut(owner_class_id) {
             let total = def.fields.len();
             let mut indices: Vec<usize> = def
                 .fields
@@ -119,12 +119,12 @@ impl ReClassGui {
     pub(super) fn change_selected_fields_type(
         &mut self,
         mem_ptr: *mut MemoryStructure,
-        owner_class_name: &str,
+        owner_class_id: u64,
         selected_field_ids: &HashSet<u64>,
         new_type: FieldType,
     ) {
         let ms = unsafe { &mut *mem_ptr };
-        if let Some(def) = ms.class_registry.get_mut(owner_class_name) {
+        if let Some(def) = ms.class_registry.get_mut(owner_class_id) {
             // Map ids to indices each pass since set_field_type_at may update structure but keeps order
             let indices: Vec<usize> = def
                 .fields
@@ -146,11 +146,11 @@ impl ReClassGui {
                     }
                 } else if new_type == FieldType::Enum {
                     if let Some(fd) = def.fields.get_mut(idx) {
-                        let names = ms.enum_registry.get_enum_names();
-                        if let Some(first) = names.into_iter().next() {
-                            fd.enum_name = Some(first);
+                        let ids = ms.enum_registry.get_enum_ids();
+                        if let Some(first) = ids.into_iter().next() {
+                            fd.enum_id = Some(first);
                         } else {
-                            fd.enum_name = None;
+                            fd.enum_id = None;
                         }
                     }
                 } else if new_type == FieldType::Array {
@@ -171,12 +171,12 @@ impl ReClassGui {
     pub(super) fn create_class_instances_for_selected(
         &mut self,
         mem_ptr: *mut MemoryStructure,
-        owner_class_name: &str,
+        owner_class_id: u64,
         selected_field_ids: &HashSet<u64>,
     ) {
         let ms = unsafe { &mut *mem_ptr };
         // Collect indices with immutable borrow first
-        let indices: Vec<usize> = if let Some(def_ref) = ms.class_registry.get(owner_class_name) {
+        let indices: Vec<usize> = if let Some(def_ref) = ms.class_registry.get(owner_class_id) {
             def_ref
                 .fields
                 .iter()
@@ -193,35 +193,35 @@ impl ReClassGui {
             return;
         };
 
-        // Plan unique names and new class defs without holding mutable borrows
-        let mut existing: std::collections::HashSet<String> =
-            ms.class_registry.get_class_names().into_iter().collect();
-        let mut planned: Vec<(usize, String, ClassDefinition)> = Vec::with_capacity(indices.len());
+        // Plan unique names and new class defs
+        let existing = ms.class_registry.clone();
+        let mut planned: Vec<(usize, u64, String, ClassDefinition)> =
+            Vec::with_capacity(indices.len());
         for idx in indices.into_iter() {
             let base = "NewClass";
             let mut name = base.to_string();
             let mut counter: usize = 1;
-            while existing.contains(&name) {
+            while existing.contains_name(&name) {
                 name = format!("{base}_{counter}");
                 counter += 1;
             }
-            existing.insert(name.clone());
             let mut new_def = ClassDefinition::new(name.clone());
             new_def.add_hex_field(FieldType::Hex64);
-            planned.push((idx, name, new_def));
+            let cid = new_def.id;
+            planned.push((idx, cid, name, new_def));
         }
 
         // Register all new class definitions
-        for (_, _, defn) in planned.iter().cloned() {
+        for (_, _, _, defn) in planned.iter().cloned() {
             ms.class_registry.register(defn);
         }
 
         // Now update owner definition fields
-        if let Some(def_mut) = ms.class_registry.get_mut(owner_class_name) {
-            for (idx, cname, _) in planned.into_iter() {
+        if let Some(def_mut) = ms.class_registry.get_mut(owner_class_id) {
+            for (idx, cid, _cname, _defn) in planned.into_iter() {
                 def_mut.set_field_type_at(idx, FieldType::ClassInstance);
                 if let Some(fd) = def_mut.fields.get_mut(idx) {
-                    fd.class_name = Some(cname);
+                    fd.class_id = Some(cid);
                 }
             }
         }

@@ -1,513 +1,1076 @@
 {
-  "root_class": {
-    "name": "root",
-    "address": 24576,
-    "class_definition": {
-      "id": 1,
-      "name": "Root1",
+  "memory": {
+    "root_class": {
+      "name": "root",
+      "address": 140703319367216,
+      "class_id": 1,
       "fields": [
         {
-          "id": 3,
+          "def_id": 2,
+          "name": "parent",
+          "field_type": "Pointer",
+          "address": 140703319367216,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": {
+            "name": "parent",
+            "address": 140703319367216,
+            "class_id": 1,
+            "fields": [
+              {
+                "def_id": 2,
+                "name": "parent",
+                "field_type": "Pointer",
+                "address": 140703319367216,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": {
+                  "ClassId": 1
+                },
+                "enum_size": null
+              },
+              {
+                "def_id": 3,
+                "name": "name",
+                "field_type": "TextPointer",
+                "address": 140703319367224,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 4,
+                "name": "module_name",
+                "field_type": "TextPointer",
+                "address": 140703319367232,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 5,
+                "name": "size",
+                "field_type": "UInt32",
+                "address": 140703319367240,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 12,
+                "name": "field_size",
+                "field_type": "UInt16",
+                "address": 140703319367244,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 13,
+                "name": "metadata_size",
+                "field_type": "UInt16",
+                "address": 140703319367246,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 6,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 140703319367248,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 7,
+                "name": "fields",
+                "field_type": "Pointer",
+                "address": 140703319367256,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": {
+                  "Array": {
+                    "element": {
+                      "ClassId": 2
+                    },
+                    "length": 1
+                  }
+                },
+                "enum_size": null
+              },
+              {
+                "def_id": 8,
+                "name": "base_class",
+                "field_type": "Pointer",
+                "address": 140703319367264,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": {
+                  "ClassId": 3
+                },
+                "enum_size": null
+              },
+              {
+                "def_id": 9,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 140703319367272,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 1,
+                "name": "metadata",
+                "field_type": "Pointer",
+                "address": 140703319367280,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": {
+                  "Array": {
+                    "element": {
+                      "ClassId": 4
+                    },
+                    "length": 1
+                  }
+                },
+                "enum_size": null
+              },
+              {
+                "def_id": 19,
+                "name": "type_scope",
+                "field_type": "Pointer",
+                "address": 140703319367288,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": {
+                  "ClassId": 5
+                },
+                "enum_size": null
+              },
+              {
+                "def_id": 20,
+                "name": "schema_type",
+                "field_type": "Pointer",
+                "address": 140703319367296,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": {
+                  "ClassId": 6
+                },
+                "enum_size": null
+              },
+              {
+                "def_id": 21,
+                "name": "flags",
+                "field_type": "UInt64",
+                "address": 140703319367304,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              }
+            ],
+            "total_size": 96
+          },
+          "pointer_target": {
+            "ClassId": 1
+          },
+          "enum_size": null
+        },
+        {
+          "def_id": 3,
+          "name": "name",
+          "field_type": "TextPointer",
+          "address": 140703319367224,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
+        },
+        {
+          "def_id": 4,
+          "name": "module_name",
+          "field_type": "TextPointer",
+          "address": 140703319367232,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
+        },
+        {
+          "def_id": 5,
+          "name": "size",
+          "field_type": "UInt32",
+          "address": 140703319367240,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
+        },
+        {
+          "def_id": 12,
+          "name": "field_size",
+          "field_type": "UInt16",
+          "address": 140703319367244,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
+        },
+        {
+          "def_id": 13,
+          "name": "metadata_size",
+          "field_type": "UInt16",
+          "address": 140703319367246,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
+        },
+        {
+          "def_id": 6,
           "name": null,
-          "field_type": "Hex8",
-          "offset": 0,
-          "class_name": null
+          "field_type": "Hex64",
+          "address": 140703319367248,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
         },
         {
-          "id": 5,
-          "name": "var_2",
-          "field_type": "ClassInstance",
-          "offset": 1,
-          "class_name": "NewClass_1"
+          "def_id": 7,
+          "name": "fields",
+          "field_type": "Pointer",
+          "address": 140703319367256,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": {
+            "Array": {
+              "element": {
+                "ClassId": 2
+              },
+              "length": 1
+            }
+          },
+          "enum_size": null
         },
         {
-          "id": 1,
+          "def_id": 8,
+          "name": "base_class",
+          "field_type": "Pointer",
+          "address": 140703319367264,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": {
+            "ClassId": 3
+          },
+          "enum_size": null
+        },
+        {
+          "def_id": 9,
           "name": null,
-          "field_type": "Hex32",
-          "offset": 1,
-          "class_name": null
+          "field_type": "Hex64",
+          "address": 140703319367272,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
         },
         {
-          "id": 2,
-          "name": "var_2",
-          "field_type": "ClassInstance",
-          "offset": 5,
-          "class_name": "NewClass2"
+          "def_id": 1,
+          "name": "metadata",
+          "field_type": "Pointer",
+          "address": 140703319367280,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": {
+            "Array": {
+              "element": {
+                "ClassId": 4
+              },
+              "length": 1
+            }
+          },
+          "enum_size": null
         },
         {
-          "id": 3,
-          "name": null,
-          "field_type": "Hex8",
-          "offset": 5,
-          "class_name": null
+          "def_id": 19,
+          "name": "type_scope",
+          "field_type": "Pointer",
+          "address": 140703319367288,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": {
+            "name": "type_scope",
+            "address": 3221167868544,
+            "class_id": 5,
+            "fields": [
+              {
+                "def_id": 27,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 3221167868544,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              }
+            ],
+            "total_size": 8
+          },
+          "pointer_target": {
+            "ClassId": 5
+          },
+          "enum_size": null
         },
         {
-          "id": 4,
-          "name": "var_4",
-          "field_type": "ClassInstance",
-          "offset": 6,
-          "class_name": "NewClass2"
+          "def_id": 20,
+          "name": "schema_type",
+          "field_type": "Pointer",
+          "address": 140703319367296,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": {
+            "name": "schema_type",
+            "address": 3221155489968,
+            "class_id": 6,
+            "fields": [
+              {
+                "def_id": 28,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 3221155489968,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 29,
+                "name": "var_type",
+                "field_type": "TextPointer",
+                "address": 3221155489976,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 30,
+                "name": "var_type_scope",
+                "field_type": "Pointer",
+                "address": 3221155489984,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": {
+                  "ClassId": 5
+                },
+                "enum_size": null
+              },
+              {
+                "def_id": 31,
+                "name": "type_category",
+                "field_type": "Enum",
+                "address": 3221155489992,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 32,
+                "name": "atomic_category",
+                "field_type": "Enum",
+                "address": 3221155489993,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 33,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 3221155489994,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 34,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 3221155490002,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 35,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 3221155490010,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              },
+              {
+                "def_id": 36,
+                "name": null,
+                "field_type": "Hex64",
+                "address": 3221155490018,
+                "data": null,
+                "error": null,
+                "is_editing": false,
+                "nested_instance": null,
+                "pointer_target": null,
+                "enum_size": null
+              }
+            ],
+            "total_size": 58
+          },
+          "pointer_target": {
+            "ClassId": 6
+          },
+          "enum_size": null
         },
         {
-          "id": 2,
-          "name": null,
-          "field_type": "Hex8",
-          "offset": 6,
-          "class_name": null
+          "def_id": 21,
+          "name": "flags",
+          "field_type": "UInt64",
+          "address": 140703319367304,
+          "data": null,
+          "error": null,
+          "is_editing": false,
+          "nested_instance": null,
+          "pointer_target": null,
+          "enum_size": null
         }
       ],
-      "total_size": 7
+      "total_size": 96
     },
-    "fields": [
-      {
-        "def_id": 3,
-        "name": null,
-        "field_type": "Hex8",
-        "address": 24576,
-        "data": null,
-        "error": null,
-        "is_editing": false,
-        "nested_instance": null
-      },
-      {
-        "def_id": 5,
-        "name": "var_2",
-        "field_type": "ClassInstance",
-        "address": 24577,
-        "data": null,
-        "error": null,
-        "is_editing": false,
-        "nested_instance": {
-          "name": "var_2",
-          "address": 24577,
-          "class_definition": {
-            "id": 3,
-            "name": "NewClass_1",
-            "fields": [
-              {
-                "id": 5,
-                "name": null,
-                "field_type": "Hex32",
-                "offset": 0,
-                "class_name": null
-              },
-              {
-                "id": 8,
-                "name": null,
-                "field_type": "Hex8",
-                "offset": 4,
-                "class_name": null
-              }
-            ],
-            "total_size": 5
-          },
+    "class_registry": {
+      "definitions": {
+        "4": {
+          "id": 4,
+          "name": "CSchemaMetadataEntry",
           "fields": [
             {
-              "def_id": 5,
+              "id": 18,
               "name": null,
-              "field_type": "Hex32",
-              "address": 24577,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": null
-            },
+              "field_type": "Hex64",
+              "offset": 0,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            }
+          ],
+          "total_size": 8,
+          "entry_offset": null
+        },
+        "3": {
+          "id": 3,
+          "name": "CSchemaClassInheritance",
+          "fields": [
             {
-              "def_id": 8,
+              "id": 11,
               "name": null,
-              "field_type": "Hex8",
-              "address": 24581,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": null
+              "field_type": "Hex64",
+              "offset": 0,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
             }
           ],
-          "total_size": 5
-        }
-      },
-      {
-        "def_id": 1,
-        "name": null,
-        "field_type": "Hex32",
-        "address": 24582,
-        "data": null,
-        "error": null,
-        "is_editing": false,
-        "nested_instance": null
-      },
-      {
-        "def_id": 2,
-        "name": "var_2",
-        "field_type": "ClassInstance",
-        "address": 24586,
-        "data": null,
-        "error": null,
-        "is_editing": false,
-        "nested_instance": {
-          "name": "var_2",
-          "address": 24586,
-          "class_definition": {
-            "id": 2,
-            "name": "NewClass2",
-            "fields": [
-              {
-                "id": 6,
-                "name": "var_5",
-                "field_type": "ClassInstance",
-                "offset": 0,
-                "class_name": "NewClass_1"
-              },
-              {
-                "id": 7,
-                "name": "var_2",
-                "field_type": "Bool",
-                "offset": 0,
-                "class_name": null
-              },
-              {
-                "id": 8,
-                "name": "var_2",
-                "field_type": "TextPointer",
-                "offset": 1,
-                "class_name": null
-              }
-            ],
-            "total_size": 9
-          },
+          "total_size": 8,
+          "entry_offset": null
+        },
+        "5": {
+          "id": 5,
+          "name": "CSchemaSystemTypeScope",
           "fields": [
             {
-              "def_id": 6,
-              "name": "var_5",
-              "field_type": "ClassInstance",
-              "address": 24586,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": {
-                "name": "var_5",
-                "address": 24586,
-                "class_definition": {
-                  "id": 3,
-                  "name": "NewClass_1",
-                  "fields": [
-                    {
-                      "id": 5,
-                      "name": null,
-                      "field_type": "Hex32",
-                      "offset": 0,
-                      "class_name": null
-                    },
-                    {
-                      "id": 8,
-                      "name": null,
-                      "field_type": "Hex8",
-                      "offset": 4,
-                      "class_name": null
-                    }
-                  ],
-                  "total_size": 5
-                },
-                "fields": [
-                  {
-                    "def_id": 5,
-                    "name": null,
-                    "field_type": "Hex32",
-                    "address": 24586,
-                    "data": null,
-                    "error": null,
-                    "is_editing": false,
-                    "nested_instance": null
-                  },
-                  {
-                    "def_id": 8,
-                    "name": null,
-                    "field_type": "Hex8",
-                    "address": 24590,
-                    "data": null,
-                    "error": null,
-                    "is_editing": false,
-                    "nested_instance": null
-                  }
-                ],
-                "total_size": 5
-              }
-            },
-            {
-              "def_id": 7,
-              "name": "var_2",
-              "field_type": "Bool",
-              "address": 24591,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": null
-            },
-            {
-              "def_id": 8,
-              "name": "var_2",
-              "field_type": "TextPointer",
-              "address": 24592,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": null
+              "id": 27,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 0,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
             }
           ],
-          "total_size": 14
-        }
-      },
-      {
-        "def_id": 3,
-        "name": null,
-        "field_type": "Hex8",
-        "address": 24600,
-        "data": null,
-        "error": null,
-        "is_editing": false,
-        "nested_instance": null
-      },
-      {
-        "def_id": 4,
-        "name": "var_4",
-        "field_type": "ClassInstance",
-        "address": 24601,
-        "data": null,
-        "error": null,
-        "is_editing": false,
-        "nested_instance": {
-          "name": "var_4",
-          "address": 24601,
-          "class_definition": {
-            "id": 2,
-            "name": "NewClass2",
-            "fields": [
-              {
-                "id": 6,
-                "name": "var_5",
-                "field_type": "ClassInstance",
-                "offset": 0,
-                "class_name": "NewClass_1"
-              },
-              {
-                "id": 7,
-                "name": "var_2",
-                "field_type": "Bool",
-                "offset": 0,
-                "class_name": null
-              },
-              {
-                "id": 8,
-                "name": "var_2",
-                "field_type": "TextPointer",
-                "offset": 1,
-                "class_name": null
-              }
-            ],
-            "total_size": 9
-          },
+          "total_size": 8,
+          "entry_offset": null
+        },
+        "6": {
+          "id": 6,
+          "name": "CSchemaType",
           "fields": [
             {
-              "def_id": 6,
-              "name": "var_5",
-              "field_type": "ClassInstance",
-              "address": 24601,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": {
-                "name": "var_5",
-                "address": 24601,
-                "class_definition": {
-                  "id": 3,
-                  "name": "NewClass_1",
-                  "fields": [
-                    {
-                      "id": 5,
-                      "name": null,
-                      "field_type": "Hex32",
-                      "offset": 0,
-                      "class_name": null
-                    },
-                    {
-                      "id": 8,
-                      "name": null,
-                      "field_type": "Hex8",
-                      "offset": 4,
-                      "class_name": null
-                    }
-                  ],
-                  "total_size": 5
-                },
-                "fields": [
-                  {
-                    "def_id": 5,
-                    "name": null,
-                    "field_type": "Hex32",
-                    "address": 24601,
-                    "data": null,
-                    "error": null,
-                    "is_editing": false,
-                    "nested_instance": null
-                  },
-                  {
-                    "def_id": 8,
-                    "name": null,
-                    "field_type": "Hex8",
-                    "address": 24605,
-                    "data": null,
-                    "error": null,
-                    "is_editing": false,
-                    "nested_instance": null
-                  }
-                ],
-                "total_size": 5
-              }
+              "id": 28,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 0,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
             },
             {
-              "def_id": 7,
-              "name": "var_2",
-              "field_type": "Bool",
-              "address": 24606,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": null
-            },
-            {
-              "def_id": 8,
-              "name": "var_2",
+              "id": 29,
+              "name": "var_type",
               "field_type": "TextPointer",
-              "address": 24607,
-              "data": null,
-              "error": null,
-              "is_editing": false,
-              "nested_instance": null
+              "offset": 8,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 30,
+              "name": "var_type_scope",
+              "field_type": "Pointer",
+              "offset": 16,
+              "class_id": null,
+              "pointer_target": {
+                "ClassId": 5
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 31,
+              "name": "type_category",
+              "field_type": "Enum",
+              "offset": 24,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": 1,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 32,
+              "name": "atomic_category",
+              "field_type": "Enum",
+              "offset": 28,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": 2,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 33,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 32,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 34,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 40,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 35,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 48,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 36,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 56,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
             }
           ],
-          "total_size": 14
+          "total_size": 64,
+          "entry_offset": null
+        },
+        "2": {
+          "id": 2,
+          "name": "CSchemaClassField",
+          "fields": [
+            {
+              "id": 14,
+              "name": "name",
+              "field_type": "TextPointer",
+              "offset": 0,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 10,
+              "name": "field_type",
+              "field_type": "Pointer",
+              "offset": 8,
+              "class_id": null,
+              "pointer_target": {
+                "FieldType": "Hex64"
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 15,
+              "name": "offset",
+              "field_type": "UInt32",
+              "offset": 16,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 16,
+              "name": "metadata_size",
+              "field_type": "UInt32",
+              "offset": 20,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 17,
+              "name": "metadata",
+              "field_type": "Pointer",
+              "offset": 24,
+              "class_id": null,
+              "pointer_target": {
+                "FieldType": "Hex64"
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            }
+          ],
+          "total_size": 32,
+          "entry_offset": null
+        },
+        "1": {
+          "id": 1,
+          "name": "CSchemaClassBinding",
+          "fields": [
+            {
+              "id": 2,
+              "name": "parent",
+              "field_type": "Pointer",
+              "offset": 0,
+              "class_id": null,
+              "pointer_target": {
+                "ClassId": 1
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 3,
+              "name": "name",
+              "field_type": "TextPointer",
+              "offset": 8,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 4,
+              "name": "module_name",
+              "field_type": "TextPointer",
+              "offset": 16,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 5,
+              "name": "size",
+              "field_type": "UInt32",
+              "offset": 24,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 12,
+              "name": "field_size",
+              "field_type": "UInt16",
+              "offset": 28,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 13,
+              "name": "metadata_size",
+              "field_type": "UInt16",
+              "offset": 30,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 6,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 32,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 7,
+              "name": "fields",
+              "field_type": "Pointer",
+              "offset": 40,
+              "class_id": null,
+              "pointer_target": {
+                "Array": {
+                  "element": {
+                    "ClassId": 2
+                  },
+                  "length": 1
+                }
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 8,
+              "name": "base_class",
+              "field_type": "Pointer",
+              "offset": 48,
+              "class_id": null,
+              "pointer_target": {
+                "ClassId": 3
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 9,
+              "name": null,
+              "field_type": "Hex64",
+              "offset": 56,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 1,
+              "name": "metadata",
+              "field_type": "Pointer",
+              "offset": 64,
+              "class_id": null,
+              "pointer_target": {
+                "Array": {
+                  "element": {
+                    "ClassId": 4
+                  },
+                  "length": 1
+                }
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 19,
+              "name": "type_scope",
+              "field_type": "Pointer",
+              "offset": 72,
+              "class_id": null,
+              "pointer_target": {
+                "ClassId": 5
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 20,
+              "name": "schema_type",
+              "field_type": "Pointer",
+              "offset": 80,
+              "class_id": null,
+              "pointer_target": {
+                "ClassId": 6
+              },
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            },
+            {
+              "id": 21,
+              "name": "flags",
+              "field_type": "UInt64",
+              "offset": 88,
+              "class_id": null,
+              "pointer_target": null,
+              "enum_id": null,
+              "enum_size": null,
+              "array_element": null,
+              "array_length": null
+            }
+          ],
+          "total_size": 96,
+          "entry_offset": null
         }
-      },
-      {
-        "def_id": 2,
-        "name": null,
-        "field_type": "Hex8",
-        "address": 24615,
-        "data": null,
-        "error": null,
-        "is_editing": false,
-        "nested_instance": null
       }
-    ],
-    "total_size": 40
-  },
-  "class_registry": {
-    "definitions": {
-      "Root1": {
-        "id": 1,
-        "name": "Root1",
-        "fields": [
-          {
-            "id": 3,
-            "name": null,
-            "field_type": "Hex8",
-            "offset": 0,
-            "class_name": null
-          },
-          {
-            "id": 5,
-            "name": "var_2",
-            "field_type": "ClassInstance",
-            "offset": 1,
-            "class_name": "NewClass_1"
-          },
-          {
-            "id": 1,
-            "name": null,
-            "field_type": "Hex32",
-            "offset": 1,
-            "class_name": null
-          },
-          {
-            "id": 2,
-            "name": "var_2",
-            "field_type": "ClassInstance",
-            "offset": 5,
-            "class_name": "NewClass2"
-          },
-          {
-            "id": 3,
-            "name": null,
-            "field_type": "Hex8",
-            "offset": 5,
-            "class_name": null
-          },
-          {
-            "id": 4,
-            "name": "var_4",
-            "field_type": "ClassInstance",
-            "offset": 6,
-            "class_name": "NewClass2"
-          },
-          {
-            "id": 2,
-            "name": null,
-            "field_type": "Hex8",
-            "offset": 6,
-            "class_name": null
-          }
-        ],
-        "total_size": 7
-      },
-      "NewClass2": {
-        "id": 2,
-        "name": "NewClass2",
-        "fields": [
-          {
-            "id": 6,
-            "name": "var_5",
-            "field_type": "ClassInstance",
-            "offset": 0,
-            "class_name": "NewClass_1"
-          },
-          {
-            "id": 7,
-            "name": "var_2",
-            "field_type": "Bool",
-            "offset": 0,
-            "class_name": null
-          },
-          {
-            "id": 8,
-            "name": "var_2",
-            "field_type": "TextPointer",
-            "offset": 1,
-            "class_name": null
-          }
-        ],
-        "total_size": 9
-      },
-      "NewClass_1": {
-        "id": 3,
-        "name": "NewClass_1",
-        "fields": [
-          {
-            "id": 5,
-            "name": null,
-            "field_type": "Hex32",
-            "offset": 0,
-            "class_name": null
-          },
-          {
-            "id": 8,
-            "name": null,
-            "field_type": "Hex8",
-            "offset": 4,
-            "class_name": null
-          }
-        ],
-        "total_size": 5
+    },
+    "enum_registry": {
+      "definitions": {
+        "1": {
+          "id": 1,
+          "name": "TypeCategory",
+          "is_flags": false,
+          "default_size": 1,
+          "variants": [
+            {
+              "name": "Builtin",
+              "value": 0
+            },
+            {
+              "name": "Ptr ",
+              "value": 1
+            },
+            {
+              "name": "Bitfield",
+              "value": 2
+            },
+            {
+              "name": "FixedArray",
+              "value": 3
+            },
+            {
+              "name": "Atomic",
+              "value": 4
+            },
+            {
+              "name": "DeclaredClass",
+              "value": 5
+            },
+            {
+              "name": "DeclaredEnum",
+              "value": 6
+            },
+            {
+              "name": "None",
+              "value": 7
+            }
+          ]
+        },
+        "2": {
+          "id": 2,
+          "name": "AtomicCategory",
+          "is_flags": false,
+          "default_size": 1,
+          "variants": [
+            {
+              "name": "Basic",
+              "value": 0
+            },
+            {
+              "name": "T",
+              "value": 1
+            },
+            {
+              "name": "CollectionOfT",
+              "value": 2
+            },
+            {
+              "name": "TF",
+              "value": 3
+            },
+            {
+              "name": "TT",
+              "value": 4
+            },
+            {
+              "name": "TTF",
+              "value": 5
+            },
+            {
+              "name": "I",
+              "value": 6
+            },
+            {
+              "name": "Unknown",
+              "value": 7
+            },
+            {
+              "name": "None",
+              "value": 8
+            }
+          ]
+        }
       }
     }
-  }
+  },
+  "signatures": []
 }

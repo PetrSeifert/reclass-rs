@@ -37,14 +37,12 @@ pub struct FieldDefinition {
     pub id: u64,
     pub name: Option<String>, // None for hex fields
     pub field_type: FieldType,
-    pub offset: u64,                           // Offset from the start of the class
-    pub class_name: Option<String>, // For ClassInstance fields, stores the target class name
+    pub offset: u64, // Offset from the start of the class
+    pub class_id: Option<u64>,
     pub pointer_target: Option<PointerTarget>, // For Pointer fields, stores target info
-    pub enum_name: Option<String>,  // For Enum fields, stores the enum name
-    pub enum_size: Option<u8>,      // For Enum fields, underlying size in bytes (1,2,4,8)
-    #[serde(default)]
+    pub enum_id: Option<u64>,
+    pub enum_size: Option<u8>, // For Enum fields, underlying size in bytes (1,2,4,8)
     pub array_element: Option<PointerTarget>, // For Array fields, element description
-    #[serde(default)]
     pub array_length: Option<u32>, // For Array fields, number of elements
 }
 
@@ -56,9 +54,9 @@ impl FieldDefinition {
             name,
             field_type,
             offset,
-            class_name: None,
+            class_id: None,
             pointer_target: None,
-            enum_name: None,
+            enum_id: None,
             enum_size: None,
             array_element: None,
             array_length: None,
@@ -72,9 +70,9 @@ impl FieldDefinition {
             name: Some(name),
             field_type,
             offset,
-            class_name: None,
+            class_id: None,
             pointer_target: None,
-            enum_name: None,
+            enum_id: None,
             enum_size: None,
             array_element: None,
             array_length: None,
@@ -87,9 +85,9 @@ impl FieldDefinition {
             name: None,
             field_type,
             offset,
-            class_name: None,
+            class_id: None,
             pointer_target: None,
-            enum_name: None,
+            enum_id: None,
             enum_size: None,
             array_element: None,
             array_length: None,
@@ -146,7 +144,7 @@ impl ClassDefinition {
     pub fn add_class_instance(&mut self, name: String, class_def: &ClassDefinition) {
         let offset = self.total_size;
         let mut field = FieldDefinition::new_named(name, FieldType::ClassInstance, offset);
-        field.class_name = Some(class_def.name.clone());
+        field.class_id = Some(class_def.id);
         self.add_field(field);
     }
 
@@ -205,13 +203,13 @@ impl ClassDefinition {
         if let Some(f) = self.fields.get_mut(index) {
             f.field_type = new_type.clone();
             if new_type != FieldType::ClassInstance {
-                f.class_name = None;
+                f.class_id = None;
             }
             if new_type != FieldType::Pointer {
                 f.pointer_target = None;
             }
             if new_type != FieldType::Enum {
-                f.enum_name = None;
+                f.enum_id = None;
             }
             if new_type != FieldType::Array {
                 f.array_element = None;
@@ -269,7 +267,7 @@ pub struct EnumVariant {
 /// Registry for enum definitions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnumDefinitionRegistry {
-    definitions: HashMap<String, EnumDefinition>,
+    definitions: HashMap<u64, EnumDefinition>,
 }
 
 impl EnumDefinitionRegistry {
@@ -280,27 +278,47 @@ impl EnumDefinitionRegistry {
     }
 
     pub fn register(&mut self, enum_def: EnumDefinition) {
-        self.definitions.insert(enum_def.name.clone(), enum_def);
+        self.definitions.insert(enum_def.id, enum_def);
     }
 
-    pub fn get(&self, name: &str) -> Option<&EnumDefinition> {
-        self.definitions.get(name)
+    pub fn get(&self, id: u64) -> Option<&EnumDefinition> {
+        self.definitions.get(&id)
+    }
+    pub fn get_mut(&mut self, id: u64) -> Option<&mut EnumDefinition> {
+        self.definitions.get_mut(&id)
     }
 
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut EnumDefinition> {
-        self.definitions.get_mut(name)
+    pub fn contains(&self, id: u64) -> bool {
+        self.definitions.contains_key(&id)
+    }
+    pub fn contains_name(&self, name: &str) -> bool {
+        self.definitions.values().any(|d| d.name == name)
     }
 
-    pub fn contains(&self, name: &str) -> bool {
-        self.definitions.contains_key(name)
-    }
-
-    pub fn get_enum_names(&self) -> Vec<String> {
+    pub fn get_enum_ids(&self) -> Vec<u64> {
         self.definitions.keys().cloned().collect()
     }
+    pub fn remove(&mut self, id: u64) -> Option<EnumDefinition> {
+        self.definitions.remove(&id)
+    }
 
-    pub fn remove(&mut self, name: &str) -> Option<EnumDefinition> {
-        self.definitions.remove(name)
+    pub fn get_by_id(&self, id: u64) -> Option<&EnumDefinition> {
+        self.definitions.get(&id)
+    }
+
+    pub fn reseed_id_counters(&self) {
+        let mut max_enum_id: u64 = 1;
+        for def in self.definitions.values() {
+            if def.id > max_enum_id {
+                max_enum_id = def.id;
+            }
+        }
+        // Bump to the next id to avoid collisions on new creations
+        ENUM_DEF_ID_COUNTER.store(max_enum_id.saturating_add(1), Ordering::Relaxed);
+    }
+
+    pub fn normalize_ids(&mut self) {
+        self.reseed_id_counters();
     }
 }
 
@@ -313,7 +331,7 @@ impl Default for EnumDefinitionRegistry {
 /// Registry for storing and reusing class definitions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClassDefinitionRegistry {
-    definitions: HashMap<String, ClassDefinition>,
+    definitions: HashMap<u64, ClassDefinition>,
 }
 
 impl ClassDefinitionRegistry {
@@ -324,27 +342,31 @@ impl ClassDefinitionRegistry {
     }
 
     pub fn register(&mut self, class_def: ClassDefinition) {
-        self.definitions.insert(class_def.name.clone(), class_def);
+        self.definitions.insert(class_def.id, class_def);
     }
 
-    pub fn get(&self, name: &str) -> Option<&ClassDefinition> {
-        self.definitions.get(name)
+    pub fn get(&self, id: u64) -> Option<&ClassDefinition> {
+        self.definitions.get(&id)
     }
 
-    pub fn get_mut(&mut self, name: &str) -> Option<&mut ClassDefinition> {
-        self.definitions.get_mut(name)
+    pub fn get_mut(&mut self, id: u64) -> Option<&mut ClassDefinition> {
+        self.definitions.get_mut(&id)
     }
 
-    pub fn contains(&self, name: &str) -> bool {
-        self.definitions.contains_key(name)
+    pub fn contains(&self, id: u64) -> bool {
+        self.definitions.contains_key(&id)
     }
 
-    pub fn get_class_names(&self) -> Vec<String> {
-        self.definitions.keys().cloned().collect()
+    pub fn contains_name(&self, name: &str) -> bool {
+        self.definitions.values().any(|d| d.name == name)
     }
 
-    pub fn remove(&mut self, name: &str) -> Option<ClassDefinition> {
-        self.definitions.remove(name)
+    pub fn get_class_ids(&self) -> Vec<u64> {
+        self.definitions.values().map(|d| d.id).collect()
+    }
+
+    pub fn remove(&mut self, id: u64) -> Option<ClassDefinition> {
+        self.definitions.remove(&id)
     }
 
     pub fn reseed_id_counters(&self) {
@@ -382,6 +404,10 @@ impl ClassDefinitionRegistry {
         }
         // After normalization, reseed counters for future creations
         self.reseed_id_counters();
+    }
+
+    pub fn get_by_id(&self, id: u64) -> Option<&ClassDefinition> {
+        self.definitions.values().find(|d| d.id == id)
     }
 }
 

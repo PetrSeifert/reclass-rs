@@ -27,20 +27,21 @@ pub struct ReClassGui {
     signatures_window_open: bool,
     needs_rebuild: bool,
     field_name_buffers: std::collections::HashMap<memory_view::FieldKey, String>,
-    class_type_buffers: std::collections::HashMap<memory_view::FieldKey, String>,
+    class_type_buffers: std::collections::HashMap<memory_view::FieldKey, u64>,
     root_class_type_buffer: Option<String>,
     root_address_buffer: Option<String>,
     cycle_error_open: bool,
     cycle_error_text: String,
     rename_dialog_open: bool,
-    rename_target_name: String,
+    rename_target_id: u64,
     rename_buffer: String,
+    rename_is_enum: bool,
     rename_error_text: Option<String>,
     theme_applied: bool,
     ui_scale: f32,
     class_filter: String,
     enum_window_open: bool,
-    enum_window_target: Option<String>,
+    enum_window_target: Option<u64>,
     enum_value_buffers: std::collections::HashMap<(String, usize), String>,
     bytes_custom_buffer: String,
     // Selection state: limited to a single class instance at a time
@@ -66,8 +67,9 @@ impl ReClassGui {
             cycle_error_open: false,
             cycle_error_text: String::new(),
             rename_dialog_open: false,
-            rename_target_name: String::new(),
+            rename_target_id: 0,
             rename_buffer: String::new(),
+            rename_is_enum: false,
             rename_error_text: None,
             theme_applied: false,
             ui_scale: 1.0,
@@ -121,28 +123,34 @@ impl eframe::App for ReClassGui {
             });
             ui.separator();
             let snapshot = self.app.get_memory_structure().map(|ms| {
-                let names = ms.class_registry.get_class_names();
-                let root_name = ms.root_class.class_definition.name.clone();
-                let mut referenced: HashSet<String> = HashSet::new();
-                for cname in &names {
-                    if let Some(def) = ms.class_registry.get(cname) {
+                let ids = ms.class_registry.get_class_ids();
+                let root_id = ms.root_class.class_id;
+                let mut referenced: HashSet<u64> = HashSet::new();
+                for cid in &ids {
+                    if let Some(def) = ms.class_registry.get(*cid) {
                         for f in &def.fields {
                             if f.field_type == crate::memory::FieldType::ClassInstance {
-                                if let Some(ref cn) = f.class_name { referenced.insert(cn.clone()); }
+                                if let Some(cid) = f.class_id { if let Some(d) = ms.class_registry.get_by_id(cid) { referenced.insert(d.id); } }
                             } else if f.field_type == crate::memory::FieldType::Pointer {
-                                if let Some(crate::memory::PointerTarget::ClassName(ref cn)) = f.pointer_target {
-                                    referenced.insert(cn.clone());
+                                if let Some(pt) = &f.pointer_target {
+                                    match pt {
+                                        crate::memory::PointerTarget::ClassId(cid) => { if let Some(d) = ms.class_registry.get_by_id(*cid) { referenced.insert(d.id); } }
+                                        crate::memory::PointerTarget::Array { element, .. } => {
+                                            if let crate::memory::PointerTarget::ClassId(cid) = element.as_ref() { if let Some(d) = ms.class_registry.get_by_id(*cid) { referenced.insert(d.id); } }
+                                        }
+                                        _ => {}
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                let unused: Vec<String> = names
+                let unused: Vec<u64> = ids
                     .iter()
-                    .filter(|n| {
-                        if *n == &root_name { return false; }
-                        if referenced.contains(*n) { return false; }
-                        if let Some(def) = ms.class_registry.get(n) {
+                    .filter(|cid| {
+                        if **cid == root_id { return false; }
+                        if referenced.contains(cid) { return false; }
+                        if let Some(def) = ms.class_registry.get(**cid) {
                             if def.fields.len() == 1 {
                                 let f = &def.fields[0];
                                 return f.field_type == crate::memory::FieldType::Hex64 && f.name.is_none();
@@ -152,14 +160,18 @@ impl eframe::App for ReClassGui {
                     })
                     .cloned()
                     .collect();
-                let enum_names = ms.enum_registry.get_enum_names();
-                (names, root_name, referenced, unused, enum_names)
+                let enum_ids = ms.enum_registry.get_enum_ids();
+                (ids, root_id, referenced, unused, enum_ids)
             });
 
-            if let Some((mut names, root_name, referenced, unused, enum_names)) = snapshot {
+            if let Some((mut ids, root_id, referenced, unused, enum_ids)) = snapshot {
                 if !self.class_filter.trim().is_empty() {
                     let needle = self.class_filter.to_lowercase();
-                    names.retain(|n| n.to_lowercase().contains(&needle));
+                    ids.retain(|id| self
+                        .app
+                        .get_memory_structure()
+                        .and_then(|ms2| ms2.class_registry.get(*id).map(|d| d.name.to_lowercase().contains(&needle)))
+                        .unwrap_or(false));
                 }
                 if ui
                     .add_enabled(!unused.is_empty(), egui::Button::new("Delete unused"))
@@ -167,39 +179,49 @@ impl eframe::App for ReClassGui {
                     .clicked()
                 {
                     if let Some(ms_mut) = self.app.get_memory_structure_mut() {
-                        for cname in &unused { ms_mut.class_registry.remove(cname); }
+                        for cid in &unused { ms_mut.class_registry.remove(*cid); }
                         self.needs_rebuild = true;
                     }
                 }
                 ui.separator();
                 ui.label("Classes");
                 ScrollArea::vertical().id_source("class_defs_scroll").show(ui, |ui| {
-                    let active = root_name.clone();
-                    for cname in names {
-                        let mut button = egui::Button::new(&cname).min_size(egui::vec2(ui.available_width(), 0.0));
-                        if active == cname {
+                    let active = root_id;
+                    for cid in ids {
+                        let label = self
+                            .app
+                            .get_memory_structure()
+                            .and_then(|ms| ms.class_registry.get(cid).map(|d| d.name.clone()))
+                            .unwrap_or_else(|| format!("#{cid}"));
+                        let mut button = egui::Button::new(label).min_size(egui::vec2(ui.available_width(), 0.0));
+                        if active == cid {
                             button = button.fill(egui::Color32::from_rgb(40, 80, 160));
                         }
                         let resp = ui.add(button);
                         if resp.double_clicked() {
                             if let Some(ms_mut) = self.app.get_memory_structure_mut() {
-                                if ms_mut.set_root_class_by_name(&cname) {
+                                if ms_mut.set_root_class_by_id(cid) {
                                     self.needs_rebuild = true;
                                 }
                             }
                         }
-                        let can_remove = cname != root_name && !referenced.contains(&cname);
+                        let can_remove = cid != root_id && !referenced.contains(&cid);
                         resp.context_menu(|ui| {
                             if ui.button("Rename").clicked() {
                                 self.rename_dialog_open = true;
-                                self.rename_target_name = cname.clone();
-                                self.rename_buffer = cname.clone();
+                                self.rename_target_id = cid;
+                                self.rename_is_enum = false;
+                                self.rename_buffer = self
+                                    .app
+                                    .get_memory_structure()
+                                    .and_then(|ms| ms.class_registry.get(cid).map(|d| d.name.clone()))
+                                    .unwrap_or_default();
                                 self.rename_error_text = None;
                                 ui.close_menu();
                             }
                             if ui.button("Set as root").clicked() {
                                 if let Some(ms_mut) = self.app.get_memory_structure_mut() {
-                                    if ms_mut.set_root_class_by_name(&cname) {
+                                    if ms_mut.set_root_class_by_id(cid) {
                                         self.needs_rebuild = true;
                                     }
                                 }
@@ -211,7 +233,7 @@ impl eframe::App for ReClassGui {
                             );
                             if remove_btn.clicked() {
                                 if let Some(ms_mut) = self.app.get_memory_structure_mut() {
-                                    ms_mut.class_registry.remove(&cname);
+                                    ms_mut.class_registry.remove(cid);
                                     self.needs_rebuild = true;
                                 }
                                 ui.close_menu();
@@ -227,7 +249,7 @@ impl eframe::App for ReClassGui {
                             let base = "NewEnum";
                             let mut name = base.to_string();
                             let mut idx: usize = 1;
-                            while ms.enum_registry.contains(&name) {
+                            while ms.enum_registry.contains_name(&name) {
                                 name = format!("{base}{idx}");
                                 idx += 1;
                             }
@@ -236,28 +258,29 @@ impl eframe::App for ReClassGui {
                     }
                 });
                 ScrollArea::vertical().id_source("enum_defs_scroll").show(ui, |ui| {
-                    for ename in enum_names {
-                        let mut resp = ui.label(ename.clone());
+                    for id in enum_ids {
+                        let name = self.app.get_memory_structure().and_then(|ms| ms.enum_registry.get(id).map(|d| d.name.clone())).unwrap_or_default();
+                        let mut resp = ui.label(name.clone());
                         resp = resp.on_hover_text("Right-click to edit");
                         resp.context_menu(|ui| {
                             if ui.button("Rename").clicked() {
-                                // reuse rename dialog for enums
                                 self.rename_dialog_open = true;
-                                self.rename_target_name = ename.clone();
-                                self.rename_buffer = ename.clone();
+                                self.rename_target_id = id;
+                                self.rename_is_enum = true;
+                                self.rename_buffer = name.clone();
                                 self.rename_error_text = None;
                                 ui.close_menu();
                             }
                             if ui.button("Open editor").clicked() {
                                 self.enum_window_open = true;
-                                self.enum_window_target = Some(ename.clone());
+                                self.enum_window_target = Some(id);
                                 ui.close_menu();
                             }
                             // Delete only if not referenced
                             if ui.button("Delete").clicked() {
                                 if let Some(ms) = self.app.get_memory_structure_mut() {
-                                    if !ms.is_enum_referenced(&ename) {
-                                        ms.enum_registry.remove(&ename);
+                                    if !ms.is_enum_referenced(id) {
+                                        ms.enum_registry.remove(id);
                                         self.needs_rebuild = true;
                                     }
                                 }
@@ -295,7 +318,7 @@ impl eframe::App for ReClassGui {
             }
         }
 
-        // Rename class definition dialog
+        // Rename definition dialog (class or enum)
         if self.rename_dialog_open {
             let error_text = self.rename_error_text.clone();
             let mut should_close = false;
@@ -304,7 +327,23 @@ impl eframe::App for ReClassGui {
                 .resizable(false)
                 .collapsible(false)
                 .show(ctx, |ui| {
-                    ui.label(format!("Current: {}", self.rename_target_name));
+                    // Show current name
+                    let current_label = if let Some(ms) = self.app.get_memory_structure() {
+                        if self.rename_is_enum {
+                            ms.enum_registry
+                                .get(self.rename_target_id)
+                                .map(|d| d.name.clone())
+                                .unwrap_or_default()
+                        } else {
+                            ms.class_registry
+                                .get(self.rename_target_id)
+                                .map(|d| d.name.clone())
+                                .unwrap_or_default()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    ui.label(format!("Current: {}", current_label));
                     let resp = ui.text_edit_singleline(&mut self.rename_buffer);
                     if let Some(err) = &error_text {
                         ui.colored_label(egui::Color32::RED, err);
@@ -319,35 +358,24 @@ impl eframe::App for ReClassGui {
                             || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
                         {
                             let new_name = self.rename_buffer.trim().to_string();
-                            if new_name.is_empty() || new_name == self.rename_target_name {
+                            if new_name.is_empty() {
                                 should_close = true;
                             } else if let Some(ms) = self.app.get_memory_structure_mut() {
-                                // Try class rename first
-                                if ms.class_registry.contains(&self.rename_target_name) {
-                                    if ms.class_registry.contains(&new_name) {
-                                        self.rename_error_text = Some(
-                                            "A class with this name already exists.".to_string(),
-                                        );
-                                    } else {
-                                        let ok =
-                                            ms.rename_class(&self.rename_target_name, &new_name);
-                                        if ok {
-                                            self.needs_rebuild = true;
-                                            should_close = true;
-                                            self.rename_error_text = None;
-                                        } else {
-                                            self.rename_error_text =
-                                                Some("Rename failed.".to_string());
-                                        }
-                                    }
-                                } else if ms.enum_registry.contains(&self.rename_target_name) {
-                                    if ms.enum_registry.contains(&new_name) {
+                                if self.rename_is_enum {
+                                    // Enum rename by id
+                                    if ms
+                                        .enum_registry
+                                        .get(self.rename_target_id)
+                                        .map(|d| d.name.as_str() == new_name)
+                                        .unwrap_or(false)
+                                    {
+                                        should_close = true;
+                                    } else if ms.enum_registry.contains_name(&new_name) {
                                         self.rename_error_text = Some(
                                             "An enum with this name already exists.".to_string(),
                                         );
                                     } else {
-                                        let ok =
-                                            ms.rename_enum(&self.rename_target_name, &new_name);
+                                        let ok = ms.rename_enum(self.rename_target_id, &new_name);
                                         if ok {
                                             self.needs_rebuild = true;
                                             should_close = true;
@@ -358,7 +386,29 @@ impl eframe::App for ReClassGui {
                                         }
                                     }
                                 } else {
-                                    self.rename_error_text = Some("Rename failed.".to_string());
+                                    // Class rename by id
+                                    if ms
+                                        .class_registry
+                                        .get(self.rename_target_id)
+                                        .map(|d| d.name.as_str() == new_name)
+                                        .unwrap_or(false)
+                                    {
+                                        should_close = true;
+                                    } else if ms.class_registry.contains_name(&new_name) {
+                                        self.rename_error_text = Some(
+                                            "A class with this name already exists.".to_string(),
+                                        );
+                                    } else {
+                                        let ok = ms.rename_class(self.rename_target_id, &new_name);
+                                        if ok {
+                                            self.needs_rebuild = true;
+                                            should_close = true;
+                                            self.rename_error_text = None;
+                                        } else {
+                                            self.rename_error_text =
+                                                Some("Rename failed.".to_string());
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -371,14 +421,14 @@ impl eframe::App for ReClassGui {
 
         // Enum editor window
         if self.enum_window_open {
-            let target = self.enum_window_target.clone();
+            let target = self.enum_window_target;
             let mut should_close = false;
             egui::Window::new("Enum Editor")
                 .open(&mut self.enum_window_open)
                 .resizable(true)
                 .show(ctx, |ui| {
-                    if let (Some(ms), Some(ename)) = (self.app.get_memory_structure_mut(), target) {
-                        if let Some(def) = ms.enum_registry.get_mut(&ename) {
+                    if let (Some(ms), Some(id)) = (self.app.get_memory_structure_mut(), target) {
+                        if let Some(def) = ms.enum_registry.get_mut(id) {
                             ui.horizontal(|ui| {
                                 ui.label(format!("Enum: {}", def.name));
                                 if ui.button("Close").clicked() {

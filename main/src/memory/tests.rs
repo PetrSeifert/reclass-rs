@@ -223,7 +223,7 @@ mod class_registry_tests {
     #[test]
     fn test_registry_creation() {
         let registry = ClassDefinitionRegistry::new();
-        assert!(registry.get_class_names().is_empty());
+        assert!(registry.get_class_ids().is_empty());
     }
 
     #[test]
@@ -232,12 +232,12 @@ mod class_registry_tests {
         let mut class = ClassDefinition::new("TestClass".to_string());
         class.add_named_field("health".to_string(), FieldType::Int32);
 
-        registry.register(class);
+        registry.register(class.clone());
 
-        assert!(registry.contains("TestClass"));
-        assert!(!registry.contains("NonExistent"));
+        assert!(registry.contains(class.id));
+        assert!(!registry.contains(9999));
 
-        let retrieved = registry.get("TestClass");
+        let retrieved = registry.get(class.id);
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().name, "TestClass");
     }
@@ -245,29 +245,31 @@ mod class_registry_tests {
     #[test]
     fn test_get_class_names() {
         let mut registry = ClassDefinitionRegistry::new();
-        registry.register(ClassDefinition::new("Class1".to_string()));
-        registry.register(ClassDefinition::new("Class2".to_string()));
+        let class1 = ClassDefinition::new("Class1".to_string());
+        let class2 = ClassDefinition::new("Class2".to_string());
+        registry.register(class1.clone());
+        registry.register(class2.clone());
 
-        let names = registry.get_class_names();
-        assert_eq!(names.len(), 2);
-        assert!(names.contains(&"Class1".to_string()));
-        assert!(names.contains(&"Class2".to_string()));
+        let ids = registry.get_class_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&class1.id));
+        assert!(ids.contains(&class2.id));
     }
 
     #[test]
     fn test_remove_class() {
         let mut registry = ClassDefinitionRegistry::new();
         let class = ClassDefinition::new("TestClass".to_string());
-        registry.register(class);
+        registry.register(class.clone());
 
-        assert!(registry.contains("TestClass"));
+        assert!(registry.contains(class.id));
 
-        let removed = registry.remove("TestClass");
+        let removed = registry.remove(class.id);
         assert!(removed.is_some());
         assert_eq!(removed.unwrap().name, "TestClass");
 
-        assert!(!registry.contains("TestClass"));
-        assert!(registry.get("TestClass").is_none());
+        assert!(!registry.contains(class.id));
+        assert!(registry.get(class.id).is_none());
     }
 }
 
@@ -313,7 +315,6 @@ mod class_instance_tests {
 
         assert_eq!(instance.name, "TestInstance");
         assert_eq!(instance.address, 0x1000);
-        assert_eq!(instance.class_definition.name, "TestClass");
         assert_eq!(instance.fields.len(), 2);
         assert_eq!(instance.total_size, 12); // 4 + 8
     }
@@ -365,9 +366,13 @@ mod class_instance_tests {
     #[test]
     fn test_display_name() {
         let class_def = ClassDefinition::new("TestClass".to_string());
-        let instance = ClassInstance::new("TestInstance".to_string(), 0x1000, class_def);
-
-        assert_eq!(instance.get_display_name(), "TestInstance: TestClass");
+        let instance = ClassInstance::new("TestInstance".to_string(), 0x1000, class_def.clone());
+        let mut registry = ClassDefinitionRegistry::new();
+        registry.register(class_def.clone());
+        assert_eq!(
+            instance.get_display_name_with_registry(&registry),
+            "TestInstance: TestClass"
+        );
     }
 }
 
@@ -380,12 +385,15 @@ mod memory_structure_tests {
         let mut class_def = ClassDefinition::new("TestClass".to_string());
         class_def.add_named_field("health".to_string(), FieldType::Int32);
 
-        let structure = MemoryStructure::new("RootInstance".to_string(), 0x1000, class_def);
+        let structure = MemoryStructure::new("RootInstance".to_string(), 0x1000, class_def.clone());
 
         assert_eq!(structure.root_class.name, "RootInstance");
         assert_eq!(structure.root_class.address, 0x1000);
-        assert_eq!(structure.root_class.class_definition.name, "TestClass");
-        assert!(structure.class_registry.contains("TestClass"));
+        assert_eq!(
+            structure.class_registry.get(class_def.id).unwrap().name,
+            "TestClass"
+        );
+        assert!(structure.class_registry.contains(class_def.id));
     }
 
     #[test]
@@ -399,10 +407,10 @@ mod memory_structure_tests {
         let mut new_class = ClassDefinition::new("NewClass".to_string());
         new_class.add_named_field("test".to_string(), FieldType::Int32);
 
-        structure.register_class(new_class);
+        structure.register_class(new_class.clone());
 
-        assert!(structure.class_registry.contains("NewClass"));
-        assert!(structure.get_class_definition("NewClass").is_some());
+        assert!(structure.class_registry.contains(new_class.id));
+        assert!(structure.get_class_definition(new_class.id).is_some());
     }
 
     #[test]
@@ -415,16 +423,23 @@ mod memory_structure_tests {
 
         let mut class_def = ClassDefinition::new("TestClass".to_string());
         class_def.add_named_field("health".to_string(), FieldType::Int32);
-        structure.register_class(class_def);
+        structure.register_class(class_def.clone());
 
         let instance =
-            structure.create_class_instance("TestInstance".to_string(), 0x2000, "TestClass");
+            structure.create_class_instance("TestInstance".to_string(), 0x2000, class_def.id);
         assert!(instance.is_some());
 
         let instance = instance.unwrap();
         assert_eq!(instance.name, "TestInstance");
         assert_eq!(instance.address, 0x2000);
-        assert_eq!(instance.class_definition.name, "TestClass");
+        assert_eq!(
+            structure
+                .class_registry
+                .get(instance.class_id)
+                .unwrap()
+                .name,
+            "TestClass"
+        );
     }
 
     #[test]
@@ -443,20 +458,20 @@ mod memory_structure_tests {
 
     #[test]
     fn test_get_available_classes() {
-        let mut structure = MemoryStructure::new(
-            "RootInstance".to_string(),
-            0x1000,
-            ClassDefinition::new("RootClass".to_string()),
-        );
+        let root_def = ClassDefinition::new("RootClass".to_string());
+        let mut structure =
+            MemoryStructure::new("RootInstance".to_string(), 0x1000, root_def.clone());
 
-        structure.register_class(ClassDefinition::new("Class1".to_string()));
-        structure.register_class(ClassDefinition::new("Class2".to_string()));
+        let class1 = ClassDefinition::new("Class1".to_string());
+        let class2 = ClassDefinition::new("Class2".to_string());
+        structure.register_class(class1.clone());
+        structure.register_class(class2.clone());
 
         let classes = structure.get_available_classes();
         assert_eq!(classes.len(), 3); // RootClass + Class1 + Class2
-        assert!(classes.contains(&"RootClass".to_string()));
-        assert!(classes.contains(&"Class1".to_string()));
-        assert!(classes.contains(&"Class2".to_string()));
+        assert!(classes.contains(&root_def.id));
+        assert!(classes.contains(&class1.id));
+        assert!(classes.contains(&class2.id));
     }
 
     #[test]
@@ -468,13 +483,20 @@ mod memory_structure_tests {
         );
         let mut other = ClassDefinition::new("Other".to_string());
         other.add_named_field("v".to_string(), FieldType::Int32);
-        structure.register_class(other);
+        structure.register_class(other.clone());
 
-        let ok = structure.set_root_class_by_name("Other");
+        let ok = structure.set_root_class_by_id(other.id);
         assert!(ok);
         assert_eq!(structure.root_class.name, "RootInstance");
         assert_eq!(structure.root_class.address, 0x1234);
-        assert_eq!(structure.root_class.class_definition.name, "Other");
+        assert_eq!(
+            structure
+                .class_registry
+                .get(structure.root_class.class_id)
+                .unwrap()
+                .name,
+            "Other"
+        );
         // fields should be rebuilt for new root def
         assert_eq!(structure.root_class.fields.len(), 1);
     }
@@ -483,11 +505,11 @@ mod memory_structure_tests {
     fn test_rebuild_root_from_registry_after_definition_change() {
         let mut def = ClassDefinition::new("Root".to_string());
         def.add_named_field("a".to_string(), FieldType::Int32);
-        let mut structure = MemoryStructure::new("inst".to_string(), 0x0, def);
+        let mut structure = MemoryStructure::new("inst".to_string(), 0x0, def.clone());
         assert_eq!(structure.root_class.fields.len(), 1);
 
         // mutate definition in registry and rebuild root
-        if let Some(d) = structure.class_registry.get_mut("Root") {
+        if let Some(d) = structure.class_registry.get_mut(def.id) {
             d.add_hex_field(FieldType::Hex32);
         }
         structure.rebuild_root_from_registry();
@@ -504,14 +526,14 @@ mod memory_structure_tests {
         let mut root = ClassDefinition::new("Root".to_string());
         root.add_hex_field(FieldType::Hex32);
 
-        let mut ms = MemoryStructure::new("inst".to_string(), 0x1000, root);
-        ms.register_class(target);
+        let mut ms = MemoryStructure::new("inst".to_string(), 0x1000, root.clone());
+        ms.register_class(target.clone());
 
         // Convert first field to ClassInstance and point to Target using normal APIs
-        if let Some(root_def) = ms.class_registry.get_mut("Root") {
+        if let Some(root_def) = ms.class_registry.get_mut(root.id) {
             root_def.set_field_type_at(0, FieldType::ClassInstance);
             if let Some(fd) = root_def.fields.get_mut(0) {
-                fd.class_name = Some("Target".to_string());
+                fd.class_id = Some(target.id);
             }
         }
         ms.rebuild_root_from_registry();
@@ -522,7 +544,10 @@ mod memory_structure_tests {
         assert_eq!(f.field_type, FieldType::ClassInstance);
         assert!(f.nested_instance.is_some());
         assert_eq!(
-            f.nested_instance.as_ref().unwrap().class_definition.name,
+            ms.class_registry
+                .get(f.nested_instance.as_ref().unwrap().class_id)
+                .unwrap()
+                .name,
             "Target"
         );
     }
@@ -559,23 +584,29 @@ mod memory_structure_tests {
 
         // Build structure and register Mid
         let mut ms = MemoryStructure::new("root".to_string(), 0x1000, root_def);
-        ms.register_class(mid_def);
+        ms.register_class(mid_def.clone());
         ms.create_nested_instances();
 
         // Ensure nested Mid exists before rename
-        assert_eq!(ms.root_class.class_definition.fields.len(), 1);
+        assert_eq!(
+            ms.class_registry
+                .get(ms.root_class.class_id)
+                .unwrap()
+                .fields
+                .len(),
+            1
+        );
         let f = &ms.root_class.fields[0];
         assert_eq!(f.field_type, FieldType::ClassInstance);
         let nested_before = f.nested_instance.as_ref().expect("nested before rename");
-        assert_eq!(nested_before.class_definition.name, "Mid");
+        assert_eq!(
+            ms.class_registry.get(nested_before.class_id).unwrap().name,
+            "Mid"
+        );
 
         // Rename Mid -> MidRenamed
-        let ok = ms.rename_class("Mid", "MidRenamed");
+        let ok = ms.rename_class(mid_def.id, "MidRenamed");
         assert!(ok);
-
-        // Definition reference in Root should update
-        let def_field = &ms.root_class.class_definition.fields[0];
-        assert_eq!(def_field.class_name.as_deref(), Some("MidRenamed"));
 
         // Instances should stay bound and reflect the new name after rebuild induced by rename
         let f_after = &ms.root_class.fields[0];
@@ -583,7 +614,10 @@ mod memory_structure_tests {
             .nested_instance
             .as_ref()
             .expect("nested after rename");
-        assert_eq!(nested_after.class_definition.name, "MidRenamed");
+        assert_eq!(
+            ms.class_registry.get(nested_after.class_id).unwrap().name,
+            "MidRenamed"
+        );
     }
 
     #[test]
@@ -593,18 +627,18 @@ mod memory_structure_tests {
         let b = ClassDefinition::new("B".to_string());
         a.add_class_instance("b_field".to_string(), &b);
 
-        let mut ms = MemoryStructure::new("root".to_string(), 0x0, a);
-        ms.register_class(b);
+        let mut ms = MemoryStructure::new("root".to_string(), 0x0, a.clone());
+        ms.register_class(b.clone());
 
-        assert!(ms.would_create_cycle("A", "A"));
-        assert!(!ms.would_create_cycle("A", "B"));
+        assert!(ms.would_create_cycle(a.id, a.id));
+        assert!(!ms.would_create_cycle(a.id, b.id));
 
         // Now make B -> A to form a cycle possibility
-        let a_def = ms.class_registry.get("A").unwrap().clone();
-        if let Some(bmut) = ms.class_registry.get_mut("B") {
+        let a_def = ms.class_registry.get(a.id).unwrap().clone();
+        if let Some(bmut) = ms.class_registry.get_mut(b.id) {
             bmut.add_class_instance("a_field".to_string(), &a_def);
         }
-        assert!(ms.would_create_cycle("A", "B"));
+        assert!(ms.would_create_cycle(a.id, b.id));
     }
 
     #[test]
@@ -615,8 +649,8 @@ mod memory_structure_tests {
         child_def.add_named_field("x".to_string(), FieldType::Int32);
         root_def.add_class_instance("child".to_string(), &child_def);
 
-        let mut ms = MemoryStructure::new("root".to_string(), 0x2000, root_def);
-        ms.register_class(child_def);
+        let mut ms = MemoryStructure::new("root".to_string(), 0x2000, root_def.clone());
+        ms.register_class(child_def.clone());
         ms.create_nested_instances();
         assert!(ms.root_class.fields[0].nested_instance.is_some());
 
@@ -627,18 +661,20 @@ mod memory_structure_tests {
             serde_json::from_str(&json).expect("deserialize MemoryStructure");
         // Rebuild nested bindings
         ms2.create_nested_instances();
-        assert!(ms2.class_registry.contains("Root"));
-        assert!(ms2.class_registry.contains("Child"));
+        assert!(ms2.class_registry.contains(root_def.id));
+        assert!(ms2.class_registry.contains(child_def.id));
         assert!(ms2.root_class.fields[0].nested_instance.is_some());
-        assert_eq!(
-            ms2.root_class.fields[0]
-                .nested_instance
-                .as_ref()
-                .unwrap()
-                .class_definition
-                .name,
-            "Child"
-        );
+        let class_def = ms2
+            .class_registry
+            .get(
+                ms2.root_class.fields[0]
+                    .nested_instance
+                    .as_ref()
+                    .unwrap()
+                    .class_id,
+            )
+            .unwrap();
+        assert_eq!(class_def.name, "Child");
     }
 }
 
@@ -707,18 +743,40 @@ mod integration_tests {
             .join("..")
             .join("memory_structure.json");
         let json = fs::read_to_string(&json_path).expect("read memory_structure.json");
-        let mut ms: MemoryStructure = serde_json::from_str(&json).expect("parse json");
-        // Normalize IDs like UI loader does
-        ms.class_registry.normalize_ids();
-        ms.create_nested_instances();
+        // Try wrapper format first (new format), then fallback to raw MemoryStructure
+        #[derive(serde::Deserialize)]
+        struct AppSave {
+            memory: MemoryStructure,
+        }
+        let mut ms: MemoryStructure =
+            if let Ok(mut wrapper) = serde_json::from_str::<AppSave>(&json) {
+                wrapper.memory.class_registry.normalize_ids();
+                wrapper.memory.enum_registry.normalize_ids();
+                wrapper.memory.create_nested_instances();
+                wrapper.memory
+            } else {
+                let mut mm: MemoryStructure = serde_json::from_str(&json).expect("parse json");
+                mm.class_registry.normalize_ids();
+                mm.enum_registry.normalize_ids();
+                mm.create_nested_instances();
+                mm
+            };
 
         // Pick root definition and convert first Hex8 to ClassInstance using normal APIs
         // Find first hex field index
         let mut hex_index: Option<usize> = None;
-        for (i, f) in ms.root_class.class_definition.fields.iter().enumerate() {
+        for (i, f) in ms
+            .class_registry
+            .get(ms.root_class.class_id)
+            .unwrap()
+            .fields
+            .iter()
+            .enumerate()
+        {
             if f.field_type == FieldType::Hex8
-                || f.field_type == FieldType::Hex32
                 || f.field_type == FieldType::Hex16
+                || f.field_type == FieldType::Hex32
+                || f.field_type == FieldType::Hex64
             {
                 hex_index = Some(i);
                 break;
@@ -727,21 +785,18 @@ mod integration_tests {
         let idx = hex_index.expect("hex field present");
 
         // Ensure there is at least one class in registry to point to (pick any non-root)
-        let target_class_name = ms
+        let target_class_id = ms
             .class_registry
-            .get_class_names()
+            .get_class_ids()
             .into_iter()
-            .find(|n| n != &ms.root_class.class_definition.name)
+            .find(|n| n != &ms.root_class.class_id)
             .expect("at least one other class in registry");
 
         // Mutate registry definition like the app does and rebuild
-        if let Some(root_def) = ms
-            .class_registry
-            .get_mut(&ms.root_class.class_definition.name)
-        {
+        if let Some(root_def) = ms.class_registry.get_mut(ms.root_class.class_id) {
             root_def.set_field_type_at(idx, FieldType::ClassInstance);
             if let Some(fd) = root_def.fields.get_mut(idx) {
-                fd.class_name = Some(target_class_name.clone());
+                fd.class_id = Some(target_class_id);
             }
         }
         ms.rebuild_root_from_registry();
@@ -751,7 +806,10 @@ mod integration_tests {
         let f = &ms.root_class.fields[idx];
         assert_eq!(f.field_type, FieldType::ClassInstance);
         let nested = f.nested_instance.as_ref().expect("nested instance created");
-        assert_eq!(nested.class_definition.name, target_class_name);
+        assert_eq!(
+            ms.class_registry.get(nested.class_id).unwrap().name,
+            ms.class_registry.get(target_class_id).unwrap().name
+        );
         // Sanity: nested fields use the target definition IDs
         assert!(!nested.fields.is_empty());
     }

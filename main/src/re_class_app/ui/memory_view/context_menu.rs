@@ -12,7 +12,7 @@ use crate::{
 
 pub(super) struct FieldCtx {
     pub mem_ptr: *mut MemoryStructure,
-    pub owner_class_name: String,
+    pub owner_class_id: u64,
     pub field_index: usize,
     pub instance_address: u64,
     pub address: u64,
@@ -28,7 +28,7 @@ impl ReClassGui {
                 .map(|addr| addr == ctx.instance_address)
                 .unwrap_or(false);
             if multi_in_same_instance && !self.selected_fields.is_empty() {
-                let owner = ctx.owner_class_name.clone();
+                let owner = ctx.owner_class_id;
                 let selected_ids: std::collections::HashSet<u64> = self
                     .selected_fields
                     .iter()
@@ -38,7 +38,7 @@ impl ReClassGui {
                 if selected_ids.len() > 1 {
                     ui.label("Selection actions");
                     if ui.button("Remove fields").clicked() {
-                        self.remove_selected_fields(ctx.mem_ptr, &owner, &selected_ids);
+                        self.remove_selected_fields(ctx.mem_ptr, owner, &selected_ids);
                         ui.close_menu();
                         return;
                     }
@@ -72,7 +72,7 @@ impl ReClassGui {
                             if ui.button(label).clicked() {
                                 self.change_selected_fields_type(
                                     ctx.mem_ptr,
-                                    &owner,
+                                    owner,
                                     &selected_ids,
                                     t.clone(),
                                 );
@@ -81,11 +81,7 @@ impl ReClassGui {
                         }
                     });
                     if ui.button("Create class instances").clicked() {
-                        self.create_class_instances_for_selected(
-                            ctx.mem_ptr,
-                            &owner,
-                            &selected_ids,
-                        );
+                        self.create_class_instances_for_selected(ctx.mem_ptr, owner, &selected_ids);
                         ui.close_menu();
                         return;
                     }
@@ -169,14 +165,14 @@ impl ReClassGui {
                 let can_remove = unsafe {
                     (*ctx.mem_ptr)
                         .class_registry
-                        .get(&ctx.owner_class_name)
+                        .get(ctx.owner_class_id)
                         .map(|d| d.fields.len() > 1)
                         .unwrap_or(false)
                 };
                 let resp = ui.add_enabled(can_remove, egui::Button::new("Remove field"));
                 if resp.clicked() {
                     let ms = unsafe { &mut *ctx.mem_ptr };
-                    if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                    if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                         def.remove_field_at(ctx.field_index);
                         self.schedule_rebuild();
                     }
@@ -212,7 +208,7 @@ impl ReClassGui {
                     let label = format!("{t:?}");
                     if ui.button(label).clicked() {
                         let ms = unsafe { &mut *ctx.mem_ptr };
-                        if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                        if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                             def.set_field_type_at(ctx.field_index, t.clone());
                             if t == FieldType::Pointer {
                                 if let Some(fd) = def.fields.get_mut(ctx.field_index) {
@@ -221,12 +217,12 @@ impl ReClassGui {
                                 }
                             } else if t == FieldType::Enum {
                                 if let Some(fd) = def.fields.get_mut(ctx.field_index) {
-                                    let names =
-                                        unsafe { (*ctx.mem_ptr).enum_registry.get_enum_names() };
-                                    if let Some(first) = names.into_iter().next() {
-                                        fd.enum_name = Some(first);
+                                    let ids =
+                                        unsafe { (*ctx.mem_ptr).enum_registry.get_enum_ids() };
+                                    if let Some(first) = ids.into_iter().next() {
+                                        fd.enum_id = Some(first);
                                     } else {
-                                        fd.enum_name = None;
+                                        fd.enum_id = None;
                                     }
                                 }
                             } else if t == FieldType::Array {
@@ -249,10 +245,18 @@ impl ReClassGui {
 
             if let Some(ms) = unsafe { (ctx.mem_ptr).as_mut() } {
                 // Snapshot current field type and metadata immutably
-                let (field_type_opt, current_enum, current_len): (Option<FieldType>, Option<String>, u32) = {
-                    if let Some(def_ref) = ms.class_registry.get(&ctx.owner_class_name) {
+                let (field_type_opt, current_enum_id, current_len): (
+                    Option<FieldType>,
+                    Option<u64>,
+                    u32,
+                ) = {
+                    if let Some(def_ref) = ms.class_registry.get(ctx.owner_class_id) {
                         if let Some(fd_ref) = def_ref.fields.get(ctx.field_index) {
-                            (Some(fd_ref.field_type.clone()), fd_ref.enum_name.clone(), fd_ref.array_length.unwrap_or(0))
+                            (
+                                Some(fd_ref.field_type.clone()),
+                                fd_ref.enum_id,
+                                fd_ref.array_length.unwrap_or(0),
+                            )
                         } else {
                             (None, None, 0)
                         }
@@ -261,27 +265,37 @@ impl ReClassGui {
                     }
                 };
                 if matches!(field_type_opt, Some(FieldType::Enum)) {
-                            ui.separator();
-                            ui.label("Enum:");
-                    let mut selected = current_enum.clone().unwrap_or_else(|| "<none>".to_string());
-                            egui::ComboBox::from_id_source((
-                                "enum_combo",
-                                ctx.owner_class_name.clone(),
-                                ctx.field_index,
-                            ))
-                    .selected_text(selected.clone())
-                            .show_ui(ui, |ui| {
-                                for n in ms.enum_registry.get_enum_names() {
-                            ui.selectable_value(&mut selected, n.clone(), n);
+                    ui.separator();
+                    ui.label("Enum:");
+                    let mut selected: Option<u64> = current_enum_id;
+                    let selected_name = selected
+                        .and_then(|eid| ms.enum_registry.get(eid).map(|d| d.name.clone()))
+                        .unwrap_or_else(|| "<none>".to_string());
+                    egui::ComboBox::from_id_source((
+                        "enum_combo",
+                        ctx.owner_class_id,
+                        ctx.field_index,
+                    ))
+                    .selected_text(selected_name)
+                    .show_ui(ui, |ui| {
+                        for id in ms.enum_registry.get_enum_ids() {
+                            let name = ms
+                                .enum_registry
+                                .get(id)
+                                .map(|d| d.name.clone())
+                                .unwrap_or_default();
+                            ui.selectable_value(&mut selected, Some(id), name);
                         }
                     });
-                    if current_enum.as_deref() != Some(&selected) && ms.enum_registry.contains(&selected) {
-                        if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                fdm.enum_name = Some(selected);
+                    if let Some(sel_id) = selected {
+                        if ms.enum_registry.contains(sel_id) {
+                            if let Some(defm) = ms.class_registry.get_mut(ctx.owner_class_id) {
+                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                    fdm.enum_id = Some(sel_id);
+                                }
                             }
+                            self.schedule_rebuild();
                         }
-                        self.schedule_rebuild();
                     }
                 } else if matches!(field_type_opt, Some(FieldType::Array)) {
                     ui.separator();
@@ -314,25 +328,36 @@ impl ReClassGui {
                                 let label = format!("{t:?}");
                                 if ui.button(label).clicked() {
                                     if t == FieldType::Enum {
-                                        let names = ms.enum_registry.get_enum_names();
-                                        if let Some(first) = names.into_iter().next() {
-                                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                                    fdm.array_element = Some(PointerTarget::EnumName(first));
+                                        let ids = ms.enum_registry.get_enum_ids();
+                                        if let Some(first) = ids.into_iter().next() {
+                                            if let Some(defm) =
+                                                ms.class_registry.get_mut(ctx.owner_class_id)
+                                            {
+                                                if let Some(fdm) =
+                                                    defm.fields.get_mut(ctx.field_index)
+                                                {
+                                                    fdm.array_element =
+                                                        Some(PointerTarget::EnumId(first));
                                                 }
                                             }
-                                        } else {
-                                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                                    fdm.array_element = Some(PointerTarget::FieldType(FieldType::UInt32));
-                                                }
+                                        } else if let Some(defm) =
+                                            ms.class_registry.get_mut(ctx.owner_class_id)
+                                        {
+                                            if let Some(fdm) =
+                                                defm.fields.get_mut(ctx.field_index)
+                                            {
+                                                fdm.array_element = Some(
+                                                    PointerTarget::FieldType(FieldType::UInt32),
+                                                );
                                             }
                                         }
-                                    } else {
-                                        if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                                fdm.array_element = Some(PointerTarget::FieldType(t));
-                                            }
+                                    } else if let Some(defm) =
+                                        ms.class_registry.get_mut(ctx.owner_class_id)
+                                    {
+                                        if let Some(fdm) = defm.fields.get_mut(ctx.field_index)
+                                        {
+                                            fdm.array_element =
+                                                Some(PointerTarget::FieldType(t));
                                         }
                                     }
                                     self.schedule_rebuild();
@@ -341,12 +366,19 @@ impl ReClassGui {
                             }
                         });
                         ui.menu_button("Enum", |ui| {
-                            let names = ms.enum_registry.get_enum_names();
-                            for name in names {
+                            let ids = ms.enum_registry.get_enum_ids();
+                            for id in ids {
+                                let name = ms
+                                    .enum_registry
+                                    .get(id)
+                                    .map(|d| d.name.clone())
+                                    .unwrap_or_default();
                                 if ui.button(name.clone()).clicked() {
-                                    if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                    if let Some(defm) =
+                                        ms.class_registry.get_mut(ctx.owner_class_id)
+                                    {
                                         if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                            fdm.array_element = Some(PointerTarget::EnumName(name));
+                                            fdm.array_element = Some(PointerTarget::EnumId(id));
                                         }
                                     }
                                     self.schedule_rebuild();
@@ -361,7 +393,7 @@ impl ReClassGui {
                                     let base = base_name;
                                     let mut name = base.to_string();
                                     let mut idx: usize = 1;
-                                    while ms.class_registry.contains(&name) {
+                                    while ms.class_registry.contains_name(&name) {
                                         name = format!("{base}_{idx}");
                                         idx += 1;
                                     }
@@ -369,22 +401,31 @@ impl ReClassGui {
                                 };
                                 let mut new_def = ClassDefinition::new(unique_name.clone());
                                 new_def.add_hex_field(FieldType::Hex64);
+                                let cid = new_def.id;
                                 ms.class_registry.register(new_def);
-                                if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                if let Some(defm) = ms.class_registry.get_mut(ctx.owner_class_id) {
                                     if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                        fdm.array_element = Some(PointerTarget::ClassName(unique_name));
+                                        fdm.array_element = Some(PointerTarget::ClassId(cid));
                                     }
                                 }
                                 self.schedule_rebuild();
                                 ui.close_menu();
                             }
                             ui.separator();
-                            let names = ms.class_registry.get_class_names();
-                            for name in names {
+                            let ids = ms.class_registry.get_class_ids();
+                            for id in ids {
+                                let name = ms
+                                    .class_registry
+                                    .get(id)
+                                    .map(|d| d.name.clone())
+                                    .unwrap_or_default();
                                 if ui.button(name.clone()).clicked() {
-                                    if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                    let cid = id;
+                                    if let Some(defm) =
+                                        ms.class_registry.get_mut(ctx.owner_class_id)
+                                    {
                                         if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                            fdm.array_element = Some(PointerTarget::ClassName(name));
+                                            fdm.array_element = Some(PointerTarget::ClassId(cid));
                                         }
                                     }
                                     self.schedule_rebuild();
@@ -396,9 +437,10 @@ impl ReClassGui {
                     ui.horizontal(|ui| {
                         ui.label("Length:");
                         let mut len_val: u32 = current_len;
-                        let resp = ui.add(egui::DragValue::new(&mut len_val).clamp_range(0..=1_048_576));
+                        let resp =
+                            ui.add(egui::DragValue::new(&mut len_val).clamp_range(0..=1_048_576));
                         if resp.changed() {
-                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                            if let Some(defm) = ms.class_registry.get_mut(ctx.owner_class_id) {
                                 if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
                                     fdm.array_length = Some(len_val);
                                 }
@@ -410,7 +452,7 @@ impl ReClassGui {
             }
 
             if let Some(ms) = unsafe { (ctx.mem_ptr).as_mut() } {
-                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                     if let Some(fd) = def.fields.get(ctx.field_index) {
                         if fd.field_type == FieldType::Pointer {
                             ui.menu_button("Pointer target", |ui| {
@@ -442,23 +484,21 @@ impl ReClassGui {
                                         if ui.button(label).clicked() {
                                             let ms = unsafe { &mut *ctx.mem_ptr };
                                             if let Some(defm) =
-                                                ms.class_registry.get_mut(&ctx.owner_class_name)
+                                                ms.class_registry.get_mut(ctx.owner_class_id)
                                             {
                                                 if let Some(fdm) =
                                                     defm.fields.get_mut(ctx.field_index)
                                                 {
                                                     if t == FieldType::Enum {
-                                                        let names = unsafe {
+                                                        let ids = unsafe {
                                                             (*ctx.mem_ptr)
                                                                 .enum_registry
-                                                                .get_enum_names()
+                                                                .get_enum_ids()
                                                         };
-                                                        if let Some(first) =
-                                                            names.into_iter().next()
+                                                        if let Some(first) = ids.into_iter().next()
                                                         {
-                                                            fdm.pointer_target = Some(
-                                                                PointerTarget::EnumName(first),
-                                                            );
+                                                            fdm.pointer_target =
+                                                                Some(PointerTarget::EnumId(first));
                                                         } else {
                                                             fdm.pointer_target =
                                                                 Some(PointerTarget::FieldType(
@@ -480,10 +520,15 @@ impl ReClassGui {
                                     // Default to Hex8 x 1
                                     if ui.button("Primitive element").clicked() {
                                         let ms = unsafe { &mut *ctx.mem_ptr };
-                                        if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                        if let Some(defm) =
+                                            ms.class_registry.get_mut(ctx.owner_class_id)
+                                        {
+                                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index)
+                                            {
                                                 fdm.pointer_target = Some(PointerTarget::Array {
-                                                    element: Box::new(PointerTarget::FieldType(FieldType::Hex8)),
+                                                    element: Box::new(PointerTarget::FieldType(
+                                                        FieldType::Hex8,
+                                                    )),
                                                     length: 1,
                                                 });
                                             }
@@ -492,16 +537,29 @@ impl ReClassGui {
                                         ui.close_menu();
                                     }
                                     ui.menu_button("Enum element", |ui| {
-                                        let names = unsafe { (*ctx.mem_ptr).enum_registry.get_enum_names() };
-                                        for name in names {
+                                        let ids =
+                                            unsafe { (*ctx.mem_ptr).enum_registry.get_enum_ids() };
+                                        for id in ids {
+                                            let name = ms
+                                                .enum_registry
+                                                .get(id)
+                                                .map(|d| d.name.clone())
+                                                .unwrap_or_default();
                                             if ui.button(name.clone()).clicked() {
                                                 let ms = unsafe { &mut *ctx.mem_ptr };
-                                                if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                                                    if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                                        fdm.pointer_target = Some(PointerTarget::Array {
-                                                            element: Box::new(PointerTarget::EnumName(name)),
-                                                            length: 1,
-                                                        });
+                                                if let Some(defm) =
+                                                    ms.class_registry.get_mut(ctx.owner_class_id)
+                                                {
+                                                    if let Some(fdm) =
+                                                        defm.fields.get_mut(ctx.field_index)
+                                                    {
+                                                        fdm.pointer_target =
+                                                            Some(PointerTarget::Array {
+                                                                element: Box::new(
+                                                                    PointerTarget::EnumId(id),
+                                                                ),
+                                                                length: 1,
+                                                            });
                                                     }
                                                 }
                                                 self.schedule_rebuild();
@@ -517,37 +575,61 @@ impl ReClassGui {
                                                 let base = base_name;
                                                 let mut name = base.to_string();
                                                 let mut idx: usize = 1;
-                                                while ms.class_registry.contains(&name) {
+                                                while ms.class_registry.contains_name(&name) {
                                                     name = format!("{base}_{idx}");
                                                     idx += 1;
                                                 }
                                                 name
                                             };
-                                            let mut new_def = ClassDefinition::new(unique_name.clone());
+                                            let mut new_def =
+                                                ClassDefinition::new(unique_name.clone());
                                             new_def.add_hex_field(FieldType::Hex64);
+                                            let cid = new_def.id;
                                             ms.class_registry.register(new_def);
-                                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                                    fdm.pointer_target = Some(PointerTarget::Array {
-                                                        element: Box::new(PointerTarget::ClassName(unique_name)),
-                                                        length: 1,
-                                                    });
+                                            if let Some(defm) =
+                                                ms.class_registry.get_mut(ctx.owner_class_id)
+                                            {
+                                                if let Some(fdm) =
+                                                    defm.fields.get_mut(ctx.field_index)
+                                                {
+                                                    fdm.pointer_target =
+                                                        Some(PointerTarget::Array {
+                                                            element: Box::new(
+                                                                PointerTarget::ClassId(cid),
+                                                            ),
+                                                            length: 1,
+                                                        });
                                                 }
                                             }
                                             self.schedule_rebuild();
                                             ui.close_menu();
                                         }
                                         ui.separator();
-                                        let names = unsafe { (*ctx.mem_ptr).class_registry.get_class_names() };
-                                        for name in names {
+                                        let ids = unsafe {
+                                            (*ctx.mem_ptr).class_registry.get_class_ids()
+                                        };
+                                        for id in ids {
+                                            let name = ms
+                                                .class_registry
+                                                .get(id)
+                                                .map(|d| d.name.clone())
+                                                .unwrap_or_default();
                                             if ui.button(name.clone()).clicked() {
                                                 let ms = unsafe { &mut *ctx.mem_ptr };
-                                                if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                                                    if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
-                                                        fdm.pointer_target = Some(PointerTarget::Array {
-                                                            element: Box::new(PointerTarget::ClassName(name)),
-                                                            length: 1,
-                                                        });
+                                                let cid = id;
+                                                if let Some(defm) =
+                                                    ms.class_registry.get_mut(ctx.owner_class_id)
+                                                {
+                                                    if let Some(fdm) =
+                                                        defm.fields.get_mut(ctx.field_index)
+                                                    {
+                                                        fdm.pointer_target =
+                                                            Some(PointerTarget::Array {
+                                                                element: Box::new(
+                                                                    PointerTarget::ClassId(cid),
+                                                                ),
+                                                                length: 1,
+                                                            });
                                                     }
                                                 }
                                                 self.schedule_rebuild();
@@ -557,19 +639,24 @@ impl ReClassGui {
                                     });
                                 });
                                 ui.menu_button("Enum", |ui| {
-                                    let names =
-                                        unsafe { (*ctx.mem_ptr).enum_registry.get_enum_names() };
-                                    for name in names {
+                                    let ids =
+                                        unsafe { (*ctx.mem_ptr).enum_registry.get_enum_ids() };
+                                    for id in ids {
+                                        let name = ms
+                                            .enum_registry
+                                            .get(id)
+                                            .map(|d| d.name.clone())
+                                            .unwrap_or_default();
                                         if ui.button(name.clone()).clicked() {
                                             let ms = unsafe { &mut *ctx.mem_ptr };
                                             if let Some(defm) =
-                                                ms.class_registry.get_mut(&ctx.owner_class_name)
+                                                ms.class_registry.get_mut(ctx.owner_class_id)
                                             {
                                                 if let Some(fdm) =
                                                     defm.fields.get_mut(ctx.field_index)
                                                 {
                                                     fdm.pointer_target =
-                                                        Some(PointerTarget::EnumName(name));
+                                                        Some(PointerTarget::EnumId(id));
                                                 }
                                             }
                                             self.schedule_rebuild();
@@ -585,7 +672,7 @@ impl ReClassGui {
                                             let base = base_name;
                                             let mut name = base.to_string();
                                             let mut idx: usize = 1;
-                                            while ms.class_registry.contains(&name) {
+                                            while ms.class_registry.contains_name(&name) {
                                                 name = format!("{base}_{idx}");
                                                 idx += 1;
                                             }
@@ -593,33 +680,40 @@ impl ReClassGui {
                                         };
                                         let mut new_def = ClassDefinition::new(unique_name.clone());
                                         new_def.add_hex_field(FieldType::Hex64);
+                                        let cid = new_def.id;
                                         ms.class_registry.register(new_def);
                                         if let Some(defm) =
-                                            ms.class_registry.get_mut(&ctx.owner_class_name)
+                                            ms.class_registry.get_mut(ctx.owner_class_id)
                                         {
                                             if let Some(fdm) = defm.fields.get_mut(ctx.field_index)
                                             {
                                                 fdm.pointer_target =
-                                                    Some(PointerTarget::ClassName(unique_name));
+                                                    Some(PointerTarget::ClassId(cid));
                                             }
                                         }
                                         self.schedule_rebuild();
                                         ui.close_menu();
                                     }
                                     ui.separator();
-                                    let names =
-                                        unsafe { (*ctx.mem_ptr).class_registry.get_class_names() };
-                                    for name in names {
+                                    let ids =
+                                        unsafe { (*ctx.mem_ptr).class_registry.get_class_ids() };
+                                    for id in ids {
+                                        let name = ms
+                                            .class_registry
+                                            .get(id)
+                                            .map(|d| d.name.clone())
+                                            .unwrap_or_default();
                                         if ui.button(name.clone()).clicked() {
                                             let ms = unsafe { &mut *ctx.mem_ptr };
+                                            let cid = id;
                                             if let Some(defm) =
-                                                ms.class_registry.get_mut(&ctx.owner_class_name)
+                                                ms.class_registry.get_mut(ctx.owner_class_id)
                                             {
                                                 if let Some(fdm) =
                                                     defm.fields.get_mut(ctx.field_index)
                                                 {
                                                     fdm.pointer_target =
-                                                        Some(PointerTarget::ClassName(name));
+                                                        Some(PointerTarget::ClassId(cid));
                                                 }
                                             }
                                             self.schedule_rebuild();
@@ -640,7 +734,7 @@ impl ReClassGui {
                     let base = base_name;
                     let mut name = base.to_string();
                     let mut idx: usize = 1;
-                    while ms.class_registry.contains(&name) {
+                    while ms.class_registry.contains_name(&name) {
                         name = format!("{base}_{idx}");
                         idx += 1;
                     }
@@ -648,11 +742,12 @@ impl ReClassGui {
                 };
                 let mut new_def = ClassDefinition::new(unique_name.clone());
                 new_def.add_hex_field(FieldType::Hex64);
+                let cid = new_def.id;
                 ms.class_registry.register(new_def.clone());
-                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                     def.set_field_type_at(ctx.field_index, FieldType::ClassInstance);
                     if let Some(fd) = def.fields.get_mut(ctx.field_index) {
-                        fd.class_name = Some(unique_name);
+                        fd.class_id = Some(cid);
                     }
                     self.schedule_rebuild();
                 }

@@ -73,7 +73,7 @@ impl FieldType {
             FieldType::TextPointer => 8,
             FieldType::Pointer => 8,
             FieldType::Enum => 4,
-            FieldType::Array => 0,        // Dynamic size; depends on element and length
+            FieldType::Array => 0, // Dynamic size; depends on element and length
             FieldType::ClassInstance => 0, // Dynamic size
         }
     }
@@ -133,10 +133,10 @@ impl fmt::Display for FieldType {
 pub enum PointerTarget {
     /// Pointer to a primitive/inline field type (e.g., Int32, Float, TextPointer, etc.)
     FieldType(FieldType),
-    /// Pointer to a class instance by name
-    ClassName(String),
-    /// Pointer to a specific enum definition by name
-    EnumName(String),
+    /// Pointer to a class instance by id
+    ClassId(u64),
+    /// Pointer to a specific enum definition by id
+    EnumId(u64),
     /// Pointer to an array at the target address (element descriptor and length)
     Array {
         element: Box<PointerTarget>,

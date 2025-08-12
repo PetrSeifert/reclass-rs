@@ -71,7 +71,7 @@ impl MemoryField {
 pub struct ClassInstance {
     pub name: String,
     pub address: u64,
-    pub class_definition: ClassDefinition,
+    pub class_id: u64,
     pub fields: Vec<MemoryField>,
     pub total_size: u64,
 }
@@ -81,18 +81,18 @@ impl ClassInstance {
         let mut instance = Self {
             name,
             address,
-            class_definition,
+            class_id: class_definition.id,
             fields: Vec::new(),
             total_size: 0,
         };
-        instance.create_fields_from_definition();
+        instance.create_fields_from_definition(&class_definition);
         instance
     }
 
-    fn create_fields_from_definition(&mut self) {
+    fn create_fields_from_definition(&mut self, class_definition: &ClassDefinition) {
         let mut current_offset = 0;
 
-        for field_def in &self.class_definition.fields {
+        for field_def in &class_definition.fields {
             let field_address = self.address + field_def.offset;
 
             let mut memory_field = match &field_def.name {
@@ -136,8 +136,12 @@ impl ClassInstance {
     }
 
     #[cfg(test)]
-    pub fn get_display_name(&self) -> String {
-        format!("{}: {}", self.name, self.class_definition.name)
+    pub fn get_display_name_with_registry(&self, reg: &ClassDefinitionRegistry) -> String {
+        let cname = reg
+            .get(self.class_id)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| format!("#{}", self.class_id));
+        format!("{}: {}", self.name, cname)
     }
 }
 
@@ -151,33 +155,6 @@ pub struct MemoryStructure {
 }
 
 impl MemoryStructure {
-    fn rename_class_in_pointer_target(pt: &mut PointerTarget, old_name: &str, new_name: &str) {
-        match pt {
-            PointerTarget::ClassName(cn) => {
-                if cn.eq_ignore_ascii_case(old_name) {
-                    *cn = new_name.to_string();
-                }
-            }
-            PointerTarget::Array { element, .. } => {
-                Self::rename_class_in_pointer_target(element.as_mut(), old_name, new_name);
-            }
-            _ => {}
-        }
-    }
-
-    fn rename_enum_in_pointer_target(pt: &mut PointerTarget, old_name: &str, new_name: &str) {
-        match pt {
-            PointerTarget::EnumName(en) => {
-                if en.eq_ignore_ascii_case(old_name) {
-                    *en = new_name.to_string();
-                }
-            }
-            PointerTarget::Array { element, .. } => {
-                Self::rename_enum_in_pointer_target(element.as_mut(), old_name, new_name);
-            }
-            _ => {}
-        }
-    }
     pub fn new(root_name: String, root_address: u64, root_class_def: ClassDefinition) -> Self {
         let root_class = ClassInstance::new(root_name, root_address, root_class_def.clone());
 
@@ -191,214 +168,77 @@ impl MemoryStructure {
         }
     }
 
-    pub fn rename_class(&mut self, old_name: &str, new_name: &str) -> bool {
+    pub fn rename_class(&mut self, id: u64, new_name: &str) -> bool {
+        if !self.class_registry.contains(id) {
+            return false;
+        }
+
+        if self.class_registry.contains_name(new_name) {
+            return false;
+        }
+
+        let old_name = self.class_registry.get(id).unwrap().name.clone();
         if old_name == new_name || old_name.is_empty() || new_name.is_empty() {
             return false;
         }
 
-        if !self.class_registry.contains(old_name) {
-            return false;
-        }
-        if self.class_registry.contains(new_name) {
-            return false;
-        }
-        let mut moved_def_opt = self.class_registry.remove(old_name);
-
-        let class_names = self.class_registry.get_class_names();
-        for cname in class_names {
-            if let Some(def_mut) = self.class_registry.get_mut(&cname) {
-                for f in &mut def_mut.fields {
-                    match f.field_type {
-                        FieldType::ClassInstance => {
-                            if let Some(ref cn) = f.class_name {
-                                if cn.eq_ignore_ascii_case(old_name) {
-                                    f.class_name = Some(new_name.to_string());
-                                }
-                            }
-                        }
-                        FieldType::Pointer => {
-                            if let Some(ref mut pt) = f.pointer_target {
-                                Self::rename_class_in_pointer_target(pt, old_name, new_name);
-                            }
-                        }
-                        FieldType::Array => {
-                            if let Some(ref mut elem) = f.array_element {
-                                Self::rename_class_in_pointer_target(elem, old_name, new_name);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-
-        if let Some(ref mut moved_def) = moved_def_opt {
-            for f in &mut moved_def.fields {
-                match f.field_type {
-                    FieldType::ClassInstance => {
-                        if let Some(ref cn) = f.class_name {
-                            if cn.eq_ignore_ascii_case(old_name) {
-                                f.class_name = Some(new_name.to_string());
-                            }
-                        }
-                    }
-                    FieldType::Pointer => {
-                        if let Some(ref mut pt) = f.pointer_target {
-                            Self::rename_class_in_pointer_target(pt, old_name, new_name);
-                        }
-                    }
-                    FieldType::Array => {
-                        if let Some(ref mut elem) = f.array_element {
-                            Self::rename_class_in_pointer_target(elem, old_name, new_name);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Self::rename_in_instance(&mut self.root_class, old_name, new_name);
-        let registry_clone = self.class_registry.clone();
-        Self::build_nested_for_instance(&registry_clone, &mut self.root_class);
-        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
-
+        let mut moved_def_opt = self.class_registry.remove(id);
         if let Some(mut def) = moved_def_opt.take() {
             def.rename(new_name.to_string());
             self.class_registry.register(def);
         }
+
+        // After registry is updated with the renamed definition, recalculate layout
+        Self::recalc_instance_layout(
+            &self.enum_registry,
+            &self.class_registry,
+            &mut self.root_class,
+        );
         true
     }
 
     /// Rename enum definition and update all field references
-    pub fn rename_enum(&mut self, old_name: &str, new_name: &str) -> bool {
+    pub fn rename_enum(&mut self, id: u64, new_name: &str) -> bool {
+        if !self.enum_registry.contains(id) {
+            return false;
+        }
+
+        if self.enum_registry.contains_name(new_name) {
+            return false;
+        }
+
+        let old_name = self.enum_registry.get(id).unwrap().name.clone();
         if old_name == new_name || old_name.is_empty() || new_name.is_empty() {
             return false;
         }
-        if !self.enum_registry.contains(old_name) {
-            return false;
-        }
-        if self.enum_registry.contains(new_name) {
-            return false;
-        }
-
-        // Update references in class definitions
-        let class_names = self.class_registry.get_class_names();
-        for cname in class_names {
-            if let Some(def_mut) = self.class_registry.get_mut(&cname) {
-                for f in &mut def_mut.fields {
-                    if f.field_type == FieldType::Enum {
-                        if let Some(ref mut en) = f.enum_name {
-                            if en.eq_ignore_ascii_case(old_name) {
-                                *en = new_name.to_string();
-                            }
-                        }
-                    }
-                    if let Some(ref mut pt) = f.pointer_target {
-                        Self::rename_enum_in_pointer_target(pt, old_name, new_name);
-                    }
-                    if let Some(ref mut elem) = f.array_element {
-                        Self::rename_enum_in_pointer_target(elem, old_name, new_name);
-                    }
-                }
-            }
-        }
-
-        // Update references inside root instance tree
-        Self::rename_enum_in_instance(&mut self.root_class, old_name, new_name);
 
         // Actually rename the enum definition by remove and re-register
-        if let Some(mut ed) = self.enum_registry.remove(old_name) {
+        if let Some(mut ed) = self.enum_registry.remove(id) {
             ed.rename(new_name.to_string());
             self.enum_registry.register(ed);
         }
 
         // Rebuild layout to reflect any size/name changes
-        let registry = self.class_registry.clone();
-        Self::build_nested_for_instance(&registry, &mut self.root_class);
-        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
+        Self::recalc_instance_layout(
+            &self.enum_registry,
+            &self.class_registry,
+            &mut self.root_class,
+        );
         true
     }
 
-    fn rename_enum_in_instance(instance: &mut ClassInstance, old_name: &str, new_name: &str) {
-        for f in &mut instance.class_definition.fields {
-            if f.field_type == FieldType::Enum {
-                if let Some(ref mut en) = f.enum_name {
-                    if en.eq_ignore_ascii_case(old_name) {
-                        *en = new_name.to_string();
-                    }
-                }
-            }
-        }
-        for field in &mut instance.fields {
-            if field.field_type == FieldType::Pointer {
-                if let Some(ref mut pt) = field.pointer_target {
-                    Self::rename_enum_in_pointer_target(pt, old_name, new_name);
-                }
-            }
-            if let Some(ref mut nested) = field.nested_instance {
-                Self::rename_enum_in_instance(nested, old_name, new_name);
-            }
-        }
-    }
-
-    /// Check if an enum name is referenced in any class definition field
-    pub fn is_enum_referenced(&self, enum_name: &str) -> bool {
-        for cname in self.class_registry.get_class_names() {
-            if let Some(def) = self.class_registry.get(&cname) {
+    /// Check if an enum is referenced in any class definition field (by id lookup)
+    pub fn is_enum_referenced(&self, enum_id: u64) -> bool {
+        for cid in self.class_registry.get_class_ids() {
+            if let Some(def) = self.class_registry.get(cid) {
                 for f in &def.fields {
-                    if f.field_type == FieldType::Enum {
-                        if let Some(ref en) = f.enum_name {
-                            if en.eq_ignore_ascii_case(enum_name) {
-                                return true;
-                            }
-                        }
+                    if f.field_type == FieldType::Enum && f.enum_id == Some(enum_id) {
+                        return true;
                     }
                 }
             }
         }
         false
-    }
-
-    fn rename_in_instance(instance: &mut ClassInstance, old_name: &str, new_name: &str) {
-        if instance
-            .class_definition
-            .name
-            .eq_ignore_ascii_case(old_name)
-        {
-            instance.class_definition.name = new_name.to_string();
-        }
-        for f in &mut instance.class_definition.fields {
-            match f.field_type {
-                FieldType::ClassInstance => {
-                    if let Some(ref cn) = f.class_name {
-                        if cn.eq_ignore_ascii_case(old_name) {
-                            f.class_name = Some(new_name.to_string());
-                        }
-                    }
-                }
-                FieldType::Pointer => {
-                    if let Some(ref mut pt) = f.pointer_target {
-                        Self::rename_class_in_pointer_target(pt, old_name, new_name);
-                    }
-                }
-                FieldType::Array => {
-                    if let Some(ref mut elem) = f.array_element {
-                        Self::rename_class_in_pointer_target(elem, old_name, new_name);
-                    }
-                }
-                _ => {}
-            }
-        }
-        for field in &mut instance.fields {
-            if field.field_type == FieldType::Pointer {
-                if let Some(ref mut pt) = field.pointer_target {
-                    Self::rename_class_in_pointer_target(pt, old_name, new_name);
-                }
-            }
-            if let Some(ref mut nested) = field.nested_instance {
-                Self::rename_in_instance(nested, old_name, new_name);
-            }
-        }
     }
 
     #[cfg(test)]
@@ -407,8 +247,8 @@ impl MemoryStructure {
     }
 
     #[cfg(test)]
-    pub fn get_class_definition(&self, name: &str) -> Option<&ClassDefinition> {
-        self.class_registry.get(name)
+    pub fn get_class_definition(&self, id: u64) -> Option<&ClassDefinition> {
+        self.class_registry.get(id)
     }
 
     #[cfg(test)]
@@ -416,17 +256,21 @@ impl MemoryStructure {
         &mut self,
         name: String,
         address: u64,
-        class_name: &str,
+        class_id: u64,
     ) -> Option<ClassInstance> {
         self.class_registry
-            .get(class_name)
+            .get(class_id)
             .map(|class_def| ClassInstance::new(name, address, class_def.clone()))
     }
 
     pub fn create_nested_instances(&mut self) {
         let registry = self.class_registry.clone();
         Self::build_nested_for_instance(&registry, &mut self.root_class);
-        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
+        Self::recalc_instance_layout(
+            &self.enum_registry,
+            &self.class_registry,
+            &mut self.root_class,
+        );
     }
 
     pub fn bind_nested_for_instance(&self, instance: &mut ClassInstance) {
@@ -436,56 +280,51 @@ impl MemoryStructure {
     }
 
     pub fn rebuild_root_from_registry(&mut self) {
-        let root_type = self.root_class.class_definition.name.clone();
-        if let Some(def) = self.class_registry.get(&root_type).cloned() {
+        let root_type = self.root_class.class_id;
+        if let Some(def) = self.class_registry.get(root_type).cloned() {
             let name = self.root_class.name.clone();
             let address = self.root_class.address;
             self.root_class = ClassInstance::new(name, address, def);
             let registry = self.class_registry.clone();
             Self::build_nested_for_instance(&registry, &mut self.root_class);
-            Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
+            Self::recalc_instance_layout(
+                &self.enum_registry,
+                &self.class_registry,
+                &mut self.root_class,
+            );
         }
     }
 
     fn build_nested_for_instance(registry: &ClassDefinitionRegistry, instance: &mut ClassInstance) {
         for field in &mut instance.fields {
             if field.field_type == FieldType::ClassInstance {
-                // Prefer matching by definition id; fallback to name if needed
-                let field_def_opt = instance
-                    .class_definition
-                    .fields
-                    .iter()
-                    .find(|fd| fd.id == field.def_id)
-                    .or_else(|| {
-                        field.name.as_ref().and_then(|n| {
-                            instance
-                                .class_definition
-                                .fields
-                                .iter()
-                                .find(|fd| fd.name.as_ref().map(|nn| nn == n).unwrap_or(false))
-                        })
-                    });
+                let field_def_opt = registry
+                    .get_by_id(instance.class_id)
+                    .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id));
 
                 if let Some(field_def) = field_def_opt {
-                    if let Some(class_name) = &field_def.class_name {
-                        if let Some(class_def) = registry.get(class_name) {
-                            // Always create a fresh instance and clear any stale nested linkage
-                            field.nested_instance = None;
-                            let mut nested_instance = ClassInstance::new(
-                                field.name.clone().unwrap_or_default(),
-                                field.address,
-                                class_def.clone(),
-                            );
-                            Self::build_nested_for_instance(registry, &mut nested_instance);
-                            // Use default enum registry for nested; caller will re-run with real registry on rebuild
-                            Self::recalc_instance_layout(
-                                &EnumDefinitionRegistry::new(),
-                                registry,
-                                &mut nested_instance,
-                            );
-                            field.nested_instance = Some(nested_instance);
-                            continue;
-                        }
+                    let class_def_opt = if let Some(cid) = field_def.class_id {
+                        registry.get_by_id(cid)
+                    } else {
+                        None
+                    };
+                    if let Some(class_def) = class_def_opt {
+                        // Always create a fresh instance and clear any stale nested linkage
+                        field.nested_instance = None;
+                        let mut nested_instance = ClassInstance::new(
+                            field.name.clone().unwrap_or_default(),
+                            field.address,
+                            class_def.clone(),
+                        );
+                        Self::build_nested_for_instance(registry, &mut nested_instance);
+                        // Use default enum registry for nested; caller will re-run with real registry on rebuild
+                        Self::recalc_instance_layout(
+                            &EnumDefinitionRegistry::new(),
+                            registry,
+                            &mut nested_instance,
+                        );
+                        field.nested_instance = Some(nested_instance);
+                        continue;
                     }
                 }
                 // If no mapping found, keep None
@@ -518,22 +357,22 @@ impl MemoryStructure {
                 FieldType::Array => {
                     // Look up field definition for element and length
                     let mut bytes: u64 = 0;
-                    if let Some(fd) = instance
-                        .class_definition
-                        .fields
-                        .iter()
-                        .find(|fd| fd.id == field.def_id)
+                    if let Some(fd) = class_registry
+                        .get_by_id(instance.class_id)
+                        .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id))
                     {
                         let len = fd.array_length.unwrap_or(0) as u64;
                         let elem_size: u64 = match &fd.array_element {
-                            Some(crate::memory::types::PointerTarget::FieldType(t)) => {
-                                t.get_size()
-                            }
-                            Some(crate::memory::types::PointerTarget::EnumName(name)) => {
-                                enum_registry.get(name).map(|ed| ed.default_size as u64).unwrap_or(0)
-                            }
-                            Some(crate::memory::types::PointerTarget::ClassName(name)) => {
-                                class_registry.get(name).map(|cd| cd.total_size).unwrap_or(0)
+                            Some(crate::memory::types::PointerTarget::FieldType(t)) => t.get_size(),
+                            Some(crate::memory::types::PointerTarget::EnumId(eid)) => enum_registry
+                                .get_by_id(*eid)
+                                .map(|ed| ed.default_size as u64)
+                                .unwrap_or(0),
+                            Some(crate::memory::types::PointerTarget::ClassId(cid)) => {
+                                class_registry
+                                    .get_by_id(*cid)
+                                    .map(|cd| cd.total_size)
+                                    .unwrap_or(0)
                             }
                             Some(crate::memory::types::PointerTarget::Array { .. }) => 0,
                             None => 0,
@@ -544,14 +383,12 @@ impl MemoryStructure {
                 }
                 FieldType::Enum => {
                     let mut size_bytes: u64 = 4;
-                    if let Some(fd) = instance
-                        .class_definition
-                        .fields
-                        .iter()
-                        .find(|fd| fd.id == field.def_id)
+                    if let Some(fd) = class_registry
+                        .get_by_id(instance.class_id)
+                        .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id))
                     {
-                        if let Some(ref ename) = fd.enum_name {
-                            if let Some(ed) = enum_registry.get(ename) {
+                        if let Some(eid) = fd.enum_id {
+                            if let Some(ed) = enum_registry.get_by_id(eid) {
                                 size_bytes = ed.default_size as u64;
                             }
                         }
@@ -568,49 +405,57 @@ impl MemoryStructure {
     /// Update root class base address and recompute all field addresses/sizes
     pub fn set_root_address(&mut self, new_address: u64) {
         self.root_class.address = new_address;
-        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
+        Self::recalc_instance_layout(
+            &self.enum_registry,
+            &self.class_registry,
+            &mut self.root_class,
+        );
     }
 
     /// Change the root class to a different class definition by name, preserving root name and address
-    pub fn set_root_class_by_name(&mut self, class_name: &str) -> bool {
-        if let Some(def) = self.class_registry.get(class_name).cloned() {
+    pub fn set_root_class_by_id(&mut self, class_id: u64) -> bool {
+        if let Some(def) = self.class_registry.get(class_id).cloned() {
             let name = self.root_class.name.clone();
             let address = self.root_class.address;
             self.root_class = ClassInstance::new(name, address, def);
             let registry = self.class_registry.clone();
             Self::build_nested_for_instance(&registry, &mut self.root_class);
-            Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
+            Self::recalc_instance_layout(
+                &self.enum_registry,
+                &self.class_registry,
+                &mut self.root_class,
+            );
             true
         } else {
             false
         }
     }
 
-    /// Check if assigning `target_class_name` to a field within `owner_class_name` would create a cycle
-    pub fn would_create_cycle(&self, owner_class_name: &str, target_class_name: &str) -> bool {
+    /// Check if assigning `target_class_id` to a field within `owner_class_id` would create a cycle
+    pub fn would_create_cycle(&self, owner_class_id: u64, target_class_id: u64) -> bool {
         // If same class, direct self-cycle
-        if owner_class_name.eq_ignore_ascii_case(target_class_name) {
+        if owner_class_id == target_class_id {
             return true;
         }
         // DFS from target to see if we can reach owner
         let mut visited: HashSet<String> = HashSet::new();
         fn dfs(
             reg: &ClassDefinitionRegistry,
-            current: &str,
-            target: &str,
+            current: u64,
+            target: u64,
             visited: &mut HashSet<String>,
         ) -> bool {
             if !visited.insert(current.to_string()) {
                 return false;
             }
-            if let Some(def) = reg.get(current) {
+            if let Some(def) = reg.get_by_id(current) {
                 for f in &def.fields {
                     if f.field_type == FieldType::ClassInstance {
-                        if let Some(ref cn) = f.class_name {
-                            if cn.eq_ignore_ascii_case(target) {
+                        if let Some(cid) = f.class_id {
+                            if cid == target {
                                 return true;
                             }
-                            if dfs(reg, cn, target, visited) {
+                            if dfs(reg, cid, target, visited) {
                                 return true;
                             }
                         }
@@ -621,8 +466,8 @@ impl MemoryStructure {
         }
         dfs(
             &self.class_registry,
-            target_class_name,
-            owner_class_name,
+            target_class_id,
+            owner_class_id,
             &mut visited,
         )
     }
@@ -633,7 +478,7 @@ impl MemoryStructure {
     }
 
     #[allow(dead_code)]
-    pub fn get_available_classes(&self) -> Vec<String> {
-        self.class_registry.get_class_names()
+    pub fn get_available_classes(&self) -> Vec<u64> {
+        self.class_registry.get_class_ids()
     }
 }

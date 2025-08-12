@@ -251,16 +251,10 @@ impl ReClassGui {
                             }
                             if let Ok(mut wrapper) = serde_json::from_str::<AppSave>(&text) {
                                 wrapper.memory.class_registry.normalize_ids();
+                                wrapper.memory.enum_registry.normalize_ids();
                                 wrapper.memory.create_nested_instances();
                                 self.app.set_memory_structure(wrapper.memory);
                                 self.app.signatures = wrapper.signatures;
-                            } else if let Ok(mut ms) =
-                                serde_json::from_str::<MemoryStructure>(&text)
-                            {
-                                // Back-compat: old files with just MemoryStructure
-                                ms.class_registry.normalize_ids();
-                                ms.create_nested_instances();
-                                self.app.set_memory_structure(ms);
                             }
                         }
                     }
@@ -318,12 +312,19 @@ impl ReClassGui {
         memory: &mut MemoryStructure,
         handle: Option<Arc<AppHandle>>,
     ) {
-        let header = format!(
-            "{} @ 0x{:X} (size {} bytes)",
-            memory.root_class.class_definition.name,
-            memory.root_class.address,
-            memory.root_class.get_size()
-        );
+        let header = {
+            let cname = memory
+                .class_registry
+                .get(memory.root_class.class_id)
+                .map(|d| d.name.clone())
+                .unwrap_or_else(|| format!("#{}", memory.root_class.class_id));
+            format!(
+                "{} @ 0x{:X} (size {} bytes)",
+                cname,
+                memory.root_class.address,
+                memory.root_class.get_size()
+            )
+        };
 
         let mem_ptr: *mut MemoryStructure = memory as *mut _;
         egui::CollapsingHeader::new(header)
@@ -332,10 +333,14 @@ impl ReClassGui {
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Class:");
-                    let mut root_class_name = self
-                        .root_class_type_buffer
-                        .clone()
-                        .unwrap_or_else(|| memory.root_class.class_definition.name.clone());
+                    let mut root_class_name =
+                        self.root_class_type_buffer.clone().unwrap_or_else(|| {
+                            memory
+                                .class_registry
+                                .get(memory.root_class.class_id)
+                                .map(|d| d.name.clone())
+                                .unwrap_or_default()
+                        });
                     let resp_name = text_edit_autowidth(ui, &mut root_class_name);
                     if resp_name.changed() {
                         self.root_class_type_buffer = Some(root_class_name.clone());
@@ -343,11 +348,14 @@ impl ReClassGui {
                     let enter_on_this = ui.input(|i| i.key_pressed(egui::Key::Enter))
                         && ui.memory(|m| m.has_focus(resp_name.id));
                     if (resp_name.lost_focus() || enter_on_this)
-                        && root_class_name != memory.root_class.class_definition.name
+                        && memory
+                            .class_registry
+                            .get(memory.root_class.class_id)
+                            .map(|d| d.name.as_str() != root_class_name)
+                            .unwrap_or(false)
                     {
-                        let old = memory.root_class.class_definition.name.clone();
-                        if !memory.class_registry.contains(&root_class_name) {
-                            memory.rename_class(&old, &root_class_name);
+                        if !memory.class_registry.contains_name(&root_class_name) {
+                            memory.rename_class(memory.root_class.class_id, &root_class_name);
                             self.needs_rebuild = true;
                             self.root_class_type_buffer = None;
                         } else {
