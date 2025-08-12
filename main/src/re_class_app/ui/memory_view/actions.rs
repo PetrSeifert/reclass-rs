@@ -153,6 +153,15 @@ impl ReClassGui {
                             fd.enum_name = None;
                         }
                     }
+                } else if new_type == FieldType::Array {
+                    if let Some(fd) = def.fields.get_mut(idx) {
+                        if fd.array_element.is_none() {
+                            fd.array_element = Some(PointerTarget::FieldType(FieldType::Hex8));
+                        }
+                        if fd.array_length.is_none() {
+                            fd.array_length = Some(1);
+                        }
+                    }
                 }
             }
             self.schedule_rebuild();

@@ -111,6 +111,7 @@ pub fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -
         }
 
         FieldType::Pointer => None,
+        FieldType::Array => None,
         FieldType::ClassInstance => None,
         FieldType::Enum => None,
     }

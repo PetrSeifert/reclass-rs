@@ -299,6 +299,143 @@ impl ReClassGui {
                             );
                         }
                         self.context_menu_for_field(&collapsing.header_response, ctx);
+                    } else if matches!(field.pointer_target, Some(PointerTarget::Array { .. })) {
+                        // Pointer to Array: show a header with element info and expand to elements
+                        let def_id = *def_ids.get(idx).unwrap_or(&0);
+                        let mut header = {
+                            let offset_from_class = field.address.saturating_sub(instance.address);
+                            let mut h = format!(
+                                "+0x{:04X}  0x{:08X}    {}: Pointer -> Array",
+                                offset_from_class,
+                                field.address,
+                                field.name.clone().unwrap_or_default()
+                            );
+                            if let Some(hd) = &handle {
+                                if let Ok(ptr) = hd.read_sized::<u64>(field.address) {
+                                    h.push_str(&format!(" (-> 0x{ptr:016X})"));
+                                }
+                            }
+                            h
+                        };
+                        if let Some(PointerTarget::Array { element, length }) = &field.pointer_target {
+                            let desc = match element.as_ref() {
+                                PointerTarget::FieldType(t) => format!("{}", t),
+                                PointerTarget::EnumName(en) => en.clone(),
+                                PointerTarget::ClassName(cn) => cn.clone(),
+                                PointerTarget::Array { .. } => String::from("Array"),
+                            };
+                            header.push_str(&format!(" [{}] {}", length, desc));
+                        }
+                        let collapsing = egui::CollapsingHeader::new(header)
+                            .default_open(false)
+                            .id_source(("ptr_arr_field", def_id, path.clone()))
+                            .show(ui, |ui| {
+                                if let (Some(hd), Some(PointerTarget::Array { element, length })) = (handle.as_ref(), &field.pointer_target) {
+                                    if let Ok(ptr) = hd.read_sized::<u64>(field.address) {
+                                        if ptr != 0 {
+                                            let len = *length as usize;
+                                            match element.as_ref() {
+                                                PointerTarget::FieldType(t) => {
+                                                    let elem_size = t.get_size();
+                                                    for i in 0..len {
+                                                        let elem_addr = ptr + (i as u64) * elem_size;
+                                                        let val = match t {
+                                                            FieldType::Hex64 => hd.read_sized::<u64>(elem_addr).ok().map(|v| format!("0x{v:016X}")),
+                                                            FieldType::Hex32 => hd.read_sized::<u32>(elem_addr).ok().map(|v| format!("0x{v:08X}")),
+                                                            FieldType::Hex16 => hd.read_sized::<u16>(elem_addr).ok().map(|v| format!("0x{v:04X}")),
+                                                            FieldType::Hex8 => hd.read_sized::<u8>(elem_addr).ok().map(|v| format!("0x{v:02X}")),
+                                                            FieldType::UInt64 => hd.read_sized::<u64>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::UInt32 => hd.read_sized::<u32>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::UInt16 => hd.read_sized::<u16>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::UInt8 => hd.read_sized::<u8>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::Int64 => hd.read_sized::<i64>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::Int32 => hd.read_sized::<i32>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::Int16 => hd.read_sized::<i16>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::Int8 => hd.read_sized::<i8>(elem_addr).ok().map(|v| v.to_string()),
+                                                            FieldType::Bool => hd.read_sized::<u8>(elem_addr).ok().map(|v| if v != 0 { "true".to_string() } else { "false".to_string() }),
+                                                            FieldType::Float => hd.read_sized::<f32>(elem_addr).ok().map(|v| format!("{v}")),
+                                                            FieldType::Double => hd.read_sized::<f64>(elem_addr).ok().map(|v| format!("{v}")),
+                                                            FieldType::Vector2 | FieldType::Vector3 | FieldType::Vector4 => {
+                                                                let lenb = t.get_size() as usize;
+                                                                let mut buf = vec![0u8; lenb];
+                                                                hd.read_slice(elem_addr, buf.as_mut_slice()).ok().map(|_|
+                                                                    buf.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
+                                                                )
+                                                            }
+                                                            FieldType::Text => hd.read_string(elem_addr, Some(32)).ok(),
+                                                            FieldType::TextPointer | FieldType::Pointer => {
+                                                                hd.read_sized::<u64>(elem_addr).ok().map(|v| format!("0x{v:016X}"))
+                                                            }
+                                                            _ => None,
+                                                        };
+                                                        ui.monospace(format!("[{}] 0x{:08X}{}", i, elem_addr, val.map(|vv| format!(" = {vv}")).unwrap_or_default()));
+                                                    }
+                                                }
+                                                PointerTarget::EnumName(en) => {
+                                                    if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                                        if let Some(ed) = ms.enum_registry.get(en) {
+                                                            let sz = ed.default_size;
+                                                            for i in 0..len {
+                                                                let elem_addr = ptr + (i as u64) * (sz as u64);
+                                                                let (raw_u64, raw_str) = match sz {
+                                                                    1 => { let v = hd.read_sized::<u8>(elem_addr).ok().unwrap_or(0) as u64; (v, v.to_string()) }
+                                                                    2 => { let v = hd.read_sized::<u16>(elem_addr).ok().unwrap_or(0) as u64; (v, v.to_string()) }
+                                                                    8 => { let v = hd.read_sized::<u64>(elem_addr).ok().unwrap_or(0); (v, v.to_string()) }
+                                                                    _ => { let v = hd.read_sized::<u32>(elem_addr).ok().unwrap_or(0) as u64; (v, v.to_string()) }
+                                                                };
+                                                                let name = ed.variants.iter().find(|v| (v.value as u64)==raw_u64).map(|v| v.name.clone()).unwrap_or(raw_str);
+                                                                ui.monospace(format!("[{}] 0x{:08X} = {}", i, elem_addr, name));
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                PointerTarget::ClassName(cn) => {
+                                                    if let Some(ms) = unsafe { (mem_ptr).as_mut() } {
+                                                        if let Some(class_def) = ms.class_registry.get(cn).cloned() {
+                                                            let elem_size = class_def.total_size.max(1);
+                                                            for i in 0..len {
+                                                                let elem_addr = ptr + (i as u64) * elem_size;
+                                                                let mut nested = ClassInstance::new(
+                                                                    format!("{}[{}]", field.name.clone().unwrap_or_default(), i),
+                                                                    elem_addr,
+                                                                    class_def.clone(),
+                                                                );
+                                                                ms.bind_nested_for_instance(&mut nested);
+                                                                ui.separator();
+                                                                ui.label(RichText::new(format!("Element [{}] @ 0x{:08X}", i, elem_addr)).strong());
+                                                                path.push(idx);
+                                                                //path.push(i);
+                                                                self.render_instance(ui, &mut nested, handle.clone(), mem_ptr, path);
+                                                                //path.pop();
+                                                                path.pop();
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                PointerTarget::Array { .. } => {}
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        let ctx = FieldCtx {
+                            mem_ptr,
+                            owner_class_name: instance.class_definition.name.clone(),
+                            field_index: idx,
+                            instance_address,
+                            address: field.address,
+                            value_preview: None,
+                        };
+                        if collapsing.header_response.clicked() {
+                            self.update_selection_for_click(
+                                ui,
+                                instance_address,
+                                idx,
+                                &def_ids,
+                                def_id,
+                            );
+                        }
+                        self.context_menu_for_field(&collapsing.header_response, ctx);
                     } else {
                         let inner = ui.horizontal(|ui| {
                             let offset_from_class = field.address.saturating_sub(instance.address);
@@ -346,6 +483,14 @@ impl ReClassGui {
                                     }
                                     Some(PointerTarget::EnumName(en)) => {
                                         format!(": {} -> {}", field.field_type, en)
+                                    }
+                                    Some(PointerTarget::Array { element, length }) => {
+                                        match element.as_ref() {
+                                            PointerTarget::FieldType(t) => format!(": {} -> Array [{}] {}", field.field_type, length, t),
+                                            PointerTarget::EnumName(en) => format!(": {} -> Array [{}] {}", field.field_type, length, en),
+                                            PointerTarget::ClassName(cn) => format!(": {} -> Array [{}] {}", field.field_type, length, cn),
+                                            PointerTarget::Array { .. } => String::from(": Pointer -> Array [..] Array"),
+                                        }
                                     }
                                     None => format!(": {}", field.field_type),
                                 };
@@ -398,6 +543,14 @@ impl ReClassGui {
                                     }
                                     Some(PointerTarget::EnumName(en)) => {
                                         format!("{} -> {}", field.field_type, en)
+                                    }
+                                    Some(PointerTarget::Array { element, length }) => {
+                                        match element.as_ref() {
+                                            PointerTarget::FieldType(t) => format!("{} -> Array [{}] {}", field.field_type, length, t),
+                                            PointerTarget::EnumName(en) => format!("{} -> Array [{}] {}", field.field_type, length, en),
+                                            PointerTarget::ClassName(cn) => format!("{} -> Array [{}] {}", field.field_type, length, cn),
+                                            PointerTarget::Array { .. } => String::from("Pointer -> Array [..] Array"),
+                                        }
                                     }
                                     None => format!("{}", field.field_type),
                                 };
@@ -503,6 +656,142 @@ impl ReClassGui {
                         }
                         self.context_menu_for_field(&resp, ctx);
                     }
+                }
+                FieldType::Array => {
+                        let (header_text, len_u32) = if let Some(fd) = instance
+                        .class_definition
+                        .fields
+                        .get(idx)
+                    {
+                        let len = fd.array_length.unwrap_or(0);
+                        let desc = match &fd.array_element {
+                            Some(PointerTarget::FieldType(t)) => format!("{}", t),
+                            Some(PointerTarget::EnumName(en)) => en.clone(),
+                            Some(PointerTarget::ClassName(cn)) => cn.clone(),
+                            Some(PointerTarget::Array { .. }) => String::from("Array"),
+                            None => String::from("<elem?>"),
+                        };
+                        (format!(
+                            "0x{:08X}    {}: Array -> [{}] {}",
+                            field.address,
+                            field.name.clone().unwrap_or_default(),
+                            len,
+                            desc
+                        ), len)
+                    } else {
+                        (format!("0x{:08X}    {}: Array", field.address, field.name.clone().unwrap_or_default()), 0)
+                    };
+
+                    let def_id = *def_ids.get(idx).unwrap_or(&0);
+                    let collapsing = egui::CollapsingHeader::new(header_text)
+                        .default_open(false)
+                        .id_source(("arr_field", def_id, path.clone()))
+                        .show(ui, |ui| {
+                            if let Some(fd) = instance.class_definition.fields.get(idx) {
+                                let len = len_u32 as usize;
+                                match &fd.array_element {
+                                    Some(PointerTarget::FieldType(t)) => {
+                                        if let Some(h) = &handle {
+                                            let elem_size = t.get_size();
+                                            for i in 0..len {
+                                                let elem_addr = field.address + (i as u64) * elem_size;
+                                                let offset_from_class = elem_addr.saturating_sub(instance.address);
+                                                let val = match t {
+                                                    FieldType::Hex64 => h.read_sized::<u64>(elem_addr).ok().map(|v| format!("0x{v:016X}")),
+                                                    FieldType::Hex32 => h.read_sized::<u32>(elem_addr).ok().map(|v| format!("0x{v:08X}")),
+                                                    FieldType::Hex16 => h.read_sized::<u16>(elem_addr).ok().map(|v| format!("0x{v:04X}")),
+                                                    FieldType::Hex8 => h.read_sized::<u8>(elem_addr).ok().map(|v| format!("0x{v:02X}")),
+                                                    FieldType::UInt64 => h.read_sized::<u64>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::UInt32 => h.read_sized::<u32>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::UInt16 => h.read_sized::<u16>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::UInt8 => h.read_sized::<u8>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::Int64 => h.read_sized::<i64>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::Int32 => h.read_sized::<i32>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::Int16 => h.read_sized::<i16>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::Int8 => h.read_sized::<i8>(elem_addr).ok().map(|v| v.to_string()),
+                                                    FieldType::Bool => h.read_sized::<u8>(elem_addr).ok().map(|v| if v != 0 { "true".to_string() } else { "false".to_string() }),
+                                                    FieldType::Float => h.read_sized::<f32>(elem_addr).ok().map(|v| format!("{v}")),
+                                                    FieldType::Double => h.read_sized::<f64>(elem_addr).ok().map(|v| format!("{v}")),
+                                                    FieldType::Vector2 | FieldType::Vector3 | FieldType::Vector4 => {
+                                                        let lenb = t.get_size() as usize;
+                                                        let mut buf = vec![0u8; lenb];
+                                                        h.read_slice(elem_addr, buf.as_mut_slice()).ok().map(|_|
+                                                            buf.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(" ")
+                                                        )
+                                                    }
+                                                    FieldType::Text => h.read_string(elem_addr, Some(32)).ok(),
+                                                    FieldType::TextPointer | FieldType::Pointer => {
+                                                        h.read_sized::<u64>(elem_addr).ok().map(|v| format!("0x{v:016X}"))
+                                                    }
+                                                    _ => None,
+                                                };
+                                                ui.monospace(format!(
+                                                    "+0x{:04X}  0x{:08X}  [{}]{}",
+                                                    offset_from_class,
+                                                    elem_addr,
+                                                    i,
+                                                    val.map(|vv| format!(" = {vv}")).unwrap_or_default()
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    Some(PointerTarget::EnumName(en)) => {
+                                        if let (Some(h), Some(ms)) = (handle.as_ref(), unsafe { (mem_ptr).as_ref() }) {
+                                            if let Some(ed) = ms.enum_registry.get(en) {
+                                                let sz = ed.default_size;
+                                                for i in 0..len {
+                                                    let elem_addr = field.address + (i as u64) * (sz as u64);
+                                                    let offset_from_class = elem_addr.saturating_sub(instance.address);
+                                                    let (raw_u64, raw_str) = match sz {
+                                                        1 => { let v = h.read_sized::<u8>(elem_addr).ok().unwrap_or(0) as u64; (v, v.to_string()) }
+                                                        2 => { let v = h.read_sized::<u16>(elem_addr).ok().unwrap_or(0) as u64; (v, v.to_string()) }
+                                                        8 => { let v = h.read_sized::<u64>(elem_addr).ok().unwrap_or(0); (v, v.to_string()) }
+                                                        _ => { let v = h.read_sized::<u32>(elem_addr).ok().unwrap_or(0) as u64; (v, v.to_string()) }
+                                                    };
+                                                    let name = ed.variants.iter().find(|v| (v.value as u64)==raw_u64).map(|v| v.name.clone()).unwrap_or(raw_str);
+                                                    ui.monospace(format!("+0x{:04X}  0x{:08X}  [{}] = {}", offset_from_class, elem_addr, i, name));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Some(PointerTarget::ClassName(cn)) => {
+                                        if let Some(ms) = unsafe { (mem_ptr).as_mut() } {
+                                            if let Some(class_def) = ms.class_registry.get(cn).cloned() {
+                                                let elem_size = class_def.total_size.max(1);
+                                                for i in 0..len {
+                                                    let elem_addr = field.address + (i as u64) * elem_size;
+                                                    let mut nested = ClassInstance::new(
+                                                        format!("{}[{}]", field.name.clone().unwrap_or_default(), i),
+                                                        elem_addr,
+                                                        class_def.clone(),
+                                                    );
+                                                    ms.bind_nested_for_instance(&mut nested);
+                                                    ui.separator();
+                                                    ui.label(RichText::new(format!("Element [{}] @ 0x{:08X}", i, elem_addr)).strong());
+                                                    path.push(idx);
+                                                    path.push(i);
+                                                    self.render_instance(ui, &mut nested, handle.clone(), mem_ptr, path);
+                                                    path.pop();
+                                                    path.pop();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Some(PointerTarget::Array { .. }) => {
+                                        ui.monospace("<nested array rendering not supported>");
+                                    }
+                                    None => {
+                                        ui.monospace("<no element type set>");
+                                    }
+                                }
+                            }
+                        });
+
+                    let ctx = FieldCtx { mem_ptr, owner_class_name: instance.class_definition.name.clone(), field_index: idx, instance_address, address: field.address, value_preview: None };
+                    if collapsing.header_response.clicked() {
+                        self.update_selection_for_click(ui, instance_address, idx, &def_ids, def_id);
+                    }
+                    self.context_menu_for_field(&collapsing.header_response, ctx);
                 }
                 FieldType::ClassInstance => {
                     let (fname_display, cname_display) =

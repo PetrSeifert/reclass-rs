@@ -151,6 +151,33 @@ pub struct MemoryStructure {
 }
 
 impl MemoryStructure {
+    fn rename_class_in_pointer_target(pt: &mut PointerTarget, old_name: &str, new_name: &str) {
+        match pt {
+            PointerTarget::ClassName(cn) => {
+                if cn.eq_ignore_ascii_case(old_name) {
+                    *cn = new_name.to_string();
+                }
+            }
+            PointerTarget::Array { element, .. } => {
+                Self::rename_class_in_pointer_target(element.as_mut(), old_name, new_name);
+            }
+            _ => {}
+        }
+    }
+
+    fn rename_enum_in_pointer_target(pt: &mut PointerTarget, old_name: &str, new_name: &str) {
+        match pt {
+            PointerTarget::EnumName(en) => {
+                if en.eq_ignore_ascii_case(old_name) {
+                    *en = new_name.to_string();
+                }
+            }
+            PointerTarget::Array { element, .. } => {
+                Self::rename_enum_in_pointer_target(element.as_mut(), old_name, new_name);
+            }
+            _ => {}
+        }
+    }
     pub fn new(root_name: String, root_address: u64, root_class_def: ClassDefinition) -> Self {
         let root_class = ClassInstance::new(root_name, root_address, root_class_def.clone());
 
@@ -190,10 +217,13 @@ impl MemoryStructure {
                             }
                         }
                         FieldType::Pointer => {
-                            if let Some(PointerTarget::ClassName(ref mut cn)) = f.pointer_target {
-                                if cn.eq_ignore_ascii_case(old_name) {
-                                    *cn = new_name.to_string();
-                                }
+                            if let Some(ref mut pt) = f.pointer_target {
+                                Self::rename_class_in_pointer_target(pt, old_name, new_name);
+                            }
+                        }
+                        FieldType::Array => {
+                            if let Some(ref mut elem) = f.array_element {
+                                Self::rename_class_in_pointer_target(elem, old_name, new_name);
                             }
                         }
                         _ => {}
@@ -213,10 +243,13 @@ impl MemoryStructure {
                         }
                     }
                     FieldType::Pointer => {
-                        if let Some(PointerTarget::ClassName(ref mut cn)) = f.pointer_target {
-                            if cn.eq_ignore_ascii_case(old_name) {
-                                *cn = new_name.to_string();
-                            }
+                        if let Some(ref mut pt) = f.pointer_target {
+                            Self::rename_class_in_pointer_target(pt, old_name, new_name);
+                        }
+                    }
+                    FieldType::Array => {
+                        if let Some(ref mut elem) = f.array_element {
+                            Self::rename_class_in_pointer_target(elem, old_name, new_name);
                         }
                     }
                     _ => {}
@@ -227,7 +260,7 @@ impl MemoryStructure {
         Self::rename_in_instance(&mut self.root_class, old_name, new_name);
         let registry_clone = self.class_registry.clone();
         Self::build_nested_for_instance(&registry_clone, &mut self.root_class);
-        Self::recalc_instance_layout(&self.enum_registry, &mut self.root_class);
+        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
 
         if let Some(mut def) = moved_def_opt.take() {
             def.rename(new_name.to_string());
@@ -260,6 +293,12 @@ impl MemoryStructure {
                             }
                         }
                     }
+                    if let Some(ref mut pt) = f.pointer_target {
+                        Self::rename_enum_in_pointer_target(pt, old_name, new_name);
+                    }
+                    if let Some(ref mut elem) = f.array_element {
+                        Self::rename_enum_in_pointer_target(elem, old_name, new_name);
+                    }
                 }
             }
         }
@@ -276,7 +315,7 @@ impl MemoryStructure {
         // Rebuild layout to reflect any size/name changes
         let registry = self.class_registry.clone();
         Self::build_nested_for_instance(&registry, &mut self.root_class);
-        Self::recalc_instance_layout(&self.enum_registry, &mut self.root_class);
+        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
         true
     }
 
@@ -291,6 +330,11 @@ impl MemoryStructure {
             }
         }
         for field in &mut instance.fields {
+            if field.field_type == FieldType::Pointer {
+                if let Some(ref mut pt) = field.pointer_target {
+                    Self::rename_enum_in_pointer_target(pt, old_name, new_name);
+                }
+            }
             if let Some(ref mut nested) = field.nested_instance {
                 Self::rename_enum_in_instance(nested, old_name, new_name);
             }
@@ -333,16 +377,24 @@ impl MemoryStructure {
                     }
                 }
                 FieldType::Pointer => {
-                    if let Some(PointerTarget::ClassName(cn)) = f.pointer_target.as_mut() {
-                        if cn.eq_ignore_ascii_case(old_name) {
-                            *cn = new_name.to_string();
-                        }
+                    if let Some(ref mut pt) = f.pointer_target {
+                        Self::rename_class_in_pointer_target(pt, old_name, new_name);
+                    }
+                }
+                FieldType::Array => {
+                    if let Some(ref mut elem) = f.array_element {
+                        Self::rename_class_in_pointer_target(elem, old_name, new_name);
                     }
                 }
                 _ => {}
             }
         }
         for field in &mut instance.fields {
+            if field.field_type == FieldType::Pointer {
+                if let Some(ref mut pt) = field.pointer_target {
+                    Self::rename_class_in_pointer_target(pt, old_name, new_name);
+                }
+            }
             if let Some(ref mut nested) = field.nested_instance {
                 Self::rename_in_instance(nested, old_name, new_name);
             }
@@ -374,13 +426,13 @@ impl MemoryStructure {
     pub fn create_nested_instances(&mut self) {
         let registry = self.class_registry.clone();
         Self::build_nested_for_instance(&registry, &mut self.root_class);
-        Self::recalc_instance_layout(&self.enum_registry, &mut self.root_class);
+        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
     }
 
     pub fn bind_nested_for_instance(&self, instance: &mut ClassInstance) {
         let registry = self.class_registry.clone();
         Self::build_nested_for_instance(&registry, instance);
-        Self::recalc_instance_layout(&self.enum_registry, instance);
+        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, instance);
     }
 
     pub fn rebuild_root_from_registry(&mut self) {
@@ -391,7 +443,7 @@ impl MemoryStructure {
             self.root_class = ClassInstance::new(name, address, def);
             let registry = self.class_registry.clone();
             Self::build_nested_for_instance(&registry, &mut self.root_class);
-            Self::recalc_instance_layout(&self.enum_registry, &mut self.root_class);
+            Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
         }
     }
 
@@ -428,6 +480,7 @@ impl MemoryStructure {
                             // Use default enum registry for nested; caller will re-run with real registry on rebuild
                             Self::recalc_instance_layout(
                                 &EnumDefinitionRegistry::new(),
+                                registry,
                                 &mut nested_instance,
                             );
                             field.nested_instance = Some(nested_instance);
@@ -441,11 +494,12 @@ impl MemoryStructure {
                 field.nested_instance = None;
             }
         }
-        Self::recalc_instance_layout(&EnumDefinitionRegistry::new(), instance);
+        Self::recalc_instance_layout(&EnumDefinitionRegistry::new(), registry, instance);
     }
 
     fn recalc_instance_layout(
         enum_registry: &EnumDefinitionRegistry,
+        class_registry: &ClassDefinitionRegistry,
         instance: &mut ClassInstance,
     ) {
         let mut current_offset: u64 = 0;
@@ -455,11 +509,38 @@ impl MemoryStructure {
                 FieldType::ClassInstance => {
                     if let Some(ref mut nested) = field.nested_instance {
                         nested.address = field.address;
-                        Self::recalc_instance_layout(enum_registry, nested);
+                        Self::recalc_instance_layout(enum_registry, class_registry, nested);
                         nested.total_size.min(1_048_576)
                     } else {
                         0
                     }
+                }
+                FieldType::Array => {
+                    // Look up field definition for element and length
+                    let mut bytes: u64 = 0;
+                    if let Some(fd) = instance
+                        .class_definition
+                        .fields
+                        .iter()
+                        .find(|fd| fd.id == field.def_id)
+                    {
+                        let len = fd.array_length.unwrap_or(0) as u64;
+                        let elem_size: u64 = match &fd.array_element {
+                            Some(crate::memory::types::PointerTarget::FieldType(t)) => {
+                                t.get_size()
+                            }
+                            Some(crate::memory::types::PointerTarget::EnumName(name)) => {
+                                enum_registry.get(name).map(|ed| ed.default_size as u64).unwrap_or(0)
+                            }
+                            Some(crate::memory::types::PointerTarget::ClassName(name)) => {
+                                class_registry.get(name).map(|cd| cd.total_size).unwrap_or(0)
+                            }
+                            Some(crate::memory::types::PointerTarget::Array { .. }) => 0,
+                            None => 0,
+                        };
+                        bytes = elem_size.saturating_mul(len);
+                    }
+                    bytes
                 }
                 FieldType::Enum => {
                     let mut size_bytes: u64 = 4;
@@ -487,7 +568,7 @@ impl MemoryStructure {
     /// Update root class base address and recompute all field addresses/sizes
     pub fn set_root_address(&mut self, new_address: u64) {
         self.root_class.address = new_address;
-        Self::recalc_instance_layout(&self.enum_registry, &mut self.root_class);
+        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
     }
 
     /// Change the root class to a different class definition by name, preserving root name and address
@@ -498,7 +579,7 @@ impl MemoryStructure {
             self.root_class = ClassInstance::new(name, address, def);
             let registry = self.class_registry.clone();
             Self::build_nested_for_instance(&registry, &mut self.root_class);
-            Self::recalc_instance_layout(&self.enum_registry, &mut self.root_class);
+            Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, &mut self.root_class);
             true
         } else {
             false

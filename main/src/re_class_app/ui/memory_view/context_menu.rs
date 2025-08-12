@@ -66,6 +66,7 @@ impl ReClassGui {
                             FieldType::TextPointer,
                             FieldType::Pointer,
                             FieldType::Enum,
+                            FieldType::Array,
                         ] {
                             let label = format!("{t:?}");
                             if ui.button(label).clicked() {
@@ -206,6 +207,7 @@ impl ReClassGui {
                     FieldType::TextPointer,
                     FieldType::Pointer,
                     FieldType::Enum,
+                    FieldType::Array,
                 ] {
                     let label = format!("{t:?}");
                     if ui.button(label).clicked() {
@@ -227,6 +229,16 @@ impl ReClassGui {
                                         fd.enum_name = None;
                                     }
                                 }
+                            } else if t == FieldType::Array {
+                                if let Some(fd) = def.fields.get_mut(ctx.field_index) {
+                                    if fd.array_element.is_none() {
+                                        fd.array_element =
+                                            Some(PointerTarget::FieldType(FieldType::Hex8));
+                                    }
+                                    if fd.array_length.is_none() {
+                                        fd.array_length = Some(1);
+                                    }
+                                }
                             }
                             self.schedule_rebuild();
                         }
@@ -236,32 +248,164 @@ impl ReClassGui {
             });
 
             if let Some(ms) = unsafe { (ctx.mem_ptr).as_mut() } {
-                if let Some(def) = ms.class_registry.get_mut(&ctx.owner_class_name) {
-                    if let Some(fd) = def.fields.get_mut(ctx.field_index) {
-                        if fd.field_type == FieldType::Enum {
+                // Snapshot current field type and metadata immutably
+                let (field_type_opt, current_enum, current_len): (Option<FieldType>, Option<String>, u32) = {
+                    if let Some(def_ref) = ms.class_registry.get(&ctx.owner_class_name) {
+                        if let Some(fd_ref) = def_ref.fields.get(ctx.field_index) {
+                            (Some(fd_ref.field_type.clone()), fd_ref.enum_name.clone(), fd_ref.array_length.unwrap_or(0))
+                        } else {
+                            (None, None, 0)
+                        }
+                    } else {
+                        (None, None, 0)
+                    }
+                };
+                if matches!(field_type_opt, Some(FieldType::Enum)) {
                             ui.separator();
                             ui.label("Enum:");
-                            let mut current =
-                                fd.enum_name.clone().unwrap_or_else(|| "<none>".to_string());
+                    let mut selected = current_enum.clone().unwrap_or_else(|| "<none>".to_string());
                             egui::ComboBox::from_id_source((
                                 "enum_combo",
                                 ctx.owner_class_name.clone(),
                                 ctx.field_index,
                             ))
-                            .selected_text(current.clone())
+                    .selected_text(selected.clone())
                             .show_ui(ui, |ui| {
                                 for n in ms.enum_registry.get_enum_names() {
-                                    ui.selectable_value(&mut current, n.clone(), n);
-                                }
-                            });
-                            if fd.enum_name.as_deref() != Some(&current)
-                                && ms.enum_registry.contains(&current)
-                            {
-                                fd.enum_name = Some(current);
-                                self.schedule_rebuild();
+                            ui.selectable_value(&mut selected, n.clone(), n);
+                        }
+                    });
+                    if current_enum.as_deref() != Some(&selected) && ms.enum_registry.contains(&selected) {
+                        if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                fdm.enum_name = Some(selected);
                             }
                         }
+                        self.schedule_rebuild();
                     }
+                } else if matches!(field_type_opt, Some(FieldType::Array)) {
+                    ui.separator();
+                    ui.label("Array element type:");
+                    ui.menu_button("Select element", |ui| {
+                        ui.menu_button("Primitive", |ui| {
+                            for t in [
+                                FieldType::Hex8,
+                                FieldType::Hex16,
+                                FieldType::Hex32,
+                                FieldType::Hex64,
+                                FieldType::Int8,
+                                FieldType::Int16,
+                                FieldType::Int32,
+                                FieldType::Int64,
+                                FieldType::UInt8,
+                                FieldType::UInt16,
+                                FieldType::UInt32,
+                                FieldType::UInt64,
+                                FieldType::Bool,
+                                FieldType::Float,
+                                FieldType::Double,
+                                FieldType::Vector2,
+                                FieldType::Vector3,
+                                FieldType::Vector4,
+                                FieldType::Text,
+                                FieldType::TextPointer,
+                                FieldType::Enum,
+                            ] {
+                                let label = format!("{t:?}");
+                                if ui.button(label).clicked() {
+                                    if t == FieldType::Enum {
+                                        let names = ms.enum_registry.get_enum_names();
+                                        if let Some(first) = names.into_iter().next() {
+                                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                                    fdm.array_element = Some(PointerTarget::EnumName(first));
+                                                }
+                                            }
+                                        } else {
+                                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                                    fdm.array_element = Some(PointerTarget::FieldType(FieldType::UInt32));
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                                fdm.array_element = Some(PointerTarget::FieldType(t));
+                                            }
+                                        }
+                                    }
+                                    self.schedule_rebuild();
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.menu_button("Enum", |ui| {
+                            let names = ms.enum_registry.get_enum_names();
+                            for name in names {
+                                if ui.button(name.clone()).clicked() {
+                                    if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                        if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                            fdm.array_element = Some(PointerTarget::EnumName(name));
+                                        }
+                                    }
+                                    self.schedule_rebuild();
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.menu_button("Class", |ui| {
+                            if ui.button("Create new class here").clicked() {
+                                let base_name = "NewClass";
+                                let unique_name = {
+                                    let base = base_name;
+                                    let mut name = base.to_string();
+                                    let mut idx: usize = 1;
+                                    while ms.class_registry.contains(&name) {
+                                        name = format!("{base}_{idx}");
+                                        idx += 1;
+                                    }
+                                    name
+                                };
+                                let mut new_def = ClassDefinition::new(unique_name.clone());
+                                new_def.add_hex_field(FieldType::Hex64);
+                                ms.class_registry.register(new_def);
+                                if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                    if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                        fdm.array_element = Some(PointerTarget::ClassName(unique_name));
+                                    }
+                                }
+                                self.schedule_rebuild();
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            let names = ms.class_registry.get_class_names();
+                            for name in names {
+                                if ui.button(name.clone()).clicked() {
+                                    if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                        if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                            fdm.array_element = Some(PointerTarget::ClassName(name));
+                                        }
+                                    }
+                                    self.schedule_rebuild();
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Length:");
+                        let mut len_val: u32 = current_len;
+                        let resp = ui.add(egui::DragValue::new(&mut len_val).clamp_range(0..=1_048_576));
+                        if resp.changed() {
+                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                    fdm.array_length = Some(len_val);
+                                }
+                            }
+                            self.schedule_rebuild();
+                        }
+                    });
                 }
             }
 
@@ -331,6 +475,86 @@ impl ReClassGui {
                                             ui.close_menu();
                                         }
                                     }
+                                });
+                                ui.menu_button("Array", |ui| {
+                                    // Default to Hex8 x 1
+                                    if ui.button("Primitive element").clicked() {
+                                        let ms = unsafe { &mut *ctx.mem_ptr };
+                                        if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                                fdm.pointer_target = Some(PointerTarget::Array {
+                                                    element: Box::new(PointerTarget::FieldType(FieldType::Hex8)),
+                                                    length: 1,
+                                                });
+                                            }
+                                        }
+                                        self.schedule_rebuild();
+                                        ui.close_menu();
+                                    }
+                                    ui.menu_button("Enum element", |ui| {
+                                        let names = unsafe { (*ctx.mem_ptr).enum_registry.get_enum_names() };
+                                        for name in names {
+                                            if ui.button(name.clone()).clicked() {
+                                                let ms = unsafe { &mut *ctx.mem_ptr };
+                                                if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                                    if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                                        fdm.pointer_target = Some(PointerTarget::Array {
+                                                            element: Box::new(PointerTarget::EnumName(name)),
+                                                            length: 1,
+                                                        });
+                                                    }
+                                                }
+                                                self.schedule_rebuild();
+                                                ui.close_menu();
+                                            }
+                                        }
+                                    });
+                                    ui.menu_button("Class element", |ui| {
+                                        if ui.button("Create new class here").clicked() {
+                                            let ms = unsafe { &mut *ctx.mem_ptr };
+                                            let base_name = "NewClass";
+                                            let unique_name = {
+                                                let base = base_name;
+                                                let mut name = base.to_string();
+                                                let mut idx: usize = 1;
+                                                while ms.class_registry.contains(&name) {
+                                                    name = format!("{base}_{idx}");
+                                                    idx += 1;
+                                                }
+                                                name
+                                            };
+                                            let mut new_def = ClassDefinition::new(unique_name.clone());
+                                            new_def.add_hex_field(FieldType::Hex64);
+                                            ms.class_registry.register(new_def);
+                                            if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                                if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                                    fdm.pointer_target = Some(PointerTarget::Array {
+                                                        element: Box::new(PointerTarget::ClassName(unique_name)),
+                                                        length: 1,
+                                                    });
+                                                }
+                                            }
+                                            self.schedule_rebuild();
+                                            ui.close_menu();
+                                        }
+                                        ui.separator();
+                                        let names = unsafe { (*ctx.mem_ptr).class_registry.get_class_names() };
+                                        for name in names {
+                                            if ui.button(name.clone()).clicked() {
+                                                let ms = unsafe { &mut *ctx.mem_ptr };
+                                                if let Some(defm) = ms.class_registry.get_mut(&ctx.owner_class_name) {
+                                                    if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                                        fdm.pointer_target = Some(PointerTarget::Array {
+                                                            element: Box::new(PointerTarget::ClassName(name)),
+                                                            length: 1,
+                                                        });
+                                                    }
+                                                }
+                                                self.schedule_rebuild();
+                                                ui.close_menu();
+                                            }
+                                        }
+                                    });
                                 });
                                 ui.menu_button("Enum", |ui| {
                                     let names =

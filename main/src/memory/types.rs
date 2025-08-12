@@ -50,6 +50,9 @@ pub enum FieldType {
 
     // Enum type (32-bit underlying by default)
     Enum,
+
+    // Array type (dynamic size; element type and length stored in FieldDefinition)
+    Array,
 }
 
 impl FieldType {
@@ -70,6 +73,7 @@ impl FieldType {
             FieldType::TextPointer => 8,
             FieldType::Pointer => 8,
             FieldType::Enum => 4,
+            FieldType::Array => 0,        // Dynamic size; depends on element and length
             FieldType::ClassInstance => 0, // Dynamic size
         }
     }
@@ -84,7 +88,7 @@ impl FieldType {
 
     /// Check if this field type has a dynamic size
     pub fn is_dynamic_size(&self) -> bool {
-        matches!(self, FieldType::ClassInstance)
+        matches!(self, FieldType::ClassInstance | FieldType::Array)
     }
 
     /// Get the display name for this field type
@@ -113,6 +117,7 @@ impl FieldType {
             FieldType::ClassInstance => "ClassInstance",
             FieldType::Pointer => "Pointer",
             FieldType::Enum => "Enum",
+            FieldType::Array => "Array",
         }
     }
 }
@@ -132,4 +137,9 @@ pub enum PointerTarget {
     ClassName(String),
     /// Pointer to a specific enum definition by name
     EnumName(String),
+    /// Pointer to an array at the target address (element descriptor and length)
+    Array {
+        element: Box<PointerTarget>,
+        length: u32,
+    },
 }

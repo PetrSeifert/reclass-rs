@@ -42,6 +42,10 @@ pub struct FieldDefinition {
     pub pointer_target: Option<PointerTarget>, // For Pointer fields, stores target info
     pub enum_name: Option<String>,  // For Enum fields, stores the enum name
     pub enum_size: Option<u8>,      // For Enum fields, underlying size in bytes (1,2,4,8)
+    #[serde(default)]
+    pub array_element: Option<PointerTarget>, // For Array fields, element description
+    #[serde(default)]
+    pub array_length: Option<u32>, // For Array fields, number of elements
 }
 
 impl FieldDefinition {
@@ -56,6 +60,8 @@ impl FieldDefinition {
             pointer_target: None,
             enum_name: None,
             enum_size: None,
+            array_element: None,
+            array_length: None,
         }
     }
 
@@ -70,6 +76,8 @@ impl FieldDefinition {
             pointer_target: None,
             enum_name: None,
             enum_size: None,
+            array_element: None,
+            array_length: None,
         }
     }
 
@@ -83,6 +91,8 @@ impl FieldDefinition {
             pointer_target: None,
             enum_name: None,
             enum_size: None,
+            array_element: None,
+            array_length: None,
         }
     }
 
@@ -202,6 +212,17 @@ impl ClassDefinition {
             }
             if new_type != FieldType::Enum {
                 f.enum_name = None;
+            }
+            if new_type != FieldType::Array {
+                f.array_element = None;
+                f.array_length = None;
+            } else {
+                if f.array_element.is_none() {
+                    f.array_element = Some(PointerTarget::FieldType(FieldType::Hex8));
+                }
+                if f.array_length.is_none() {
+                    f.array_length = Some(1);
+                }
             }
             if !new_type.is_hex_type() && f.name.is_none() {
                 f.name = Some(format!("var_{index}"));

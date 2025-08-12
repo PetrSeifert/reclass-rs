@@ -45,6 +45,7 @@ mod field_type_tests {
         assert_eq!(FieldType::TextPointer.get_size(), 8);
 
         assert_eq!(FieldType::ClassInstance.get_size(), 0); // Dynamic size
+        assert_eq!(FieldType::Array.get_size(), 0); // Dynamic size
     }
 
     #[test]
@@ -62,6 +63,7 @@ mod field_type_tests {
     #[test]
     fn test_dynamic_size_detection() {
         assert!(FieldType::ClassInstance.is_dynamic_size());
+        assert!(FieldType::Array.is_dynamic_size());
 
         assert!(!FieldType::Hex64.is_dynamic_size());
         assert!(!FieldType::Int32.is_dynamic_size());
@@ -74,6 +76,7 @@ mod field_type_tests {
         assert_eq!(FieldType::Int32.get_display_name(), "Int32");
         assert_eq!(FieldType::Bool.get_display_name(), "Bool");
         assert_eq!(FieldType::ClassInstance.get_display_name(), "ClassInstance");
+        assert_eq!(FieldType::Array.get_display_name(), "Array");
     }
 
     #[test]
@@ -81,6 +84,7 @@ mod field_type_tests {
         assert_eq!(FieldType::Hex64.to_string(), "Hex64");
         assert_eq!(FieldType::Int32.to_string(), "Int32");
         assert_eq!(FieldType::ClassInstance.to_string(), "ClassInstance");
+        assert_eq!(FieldType::Array.to_string(), "Array");
     }
 }
 
