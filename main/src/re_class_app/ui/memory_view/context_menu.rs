@@ -343,21 +343,18 @@ impl ReClassGui {
                                         } else if let Some(defm) =
                                             ms.class_registry.get_mut(ctx.owner_class_id)
                                         {
-                                            if let Some(fdm) =
-                                                defm.fields.get_mut(ctx.field_index)
+                                            if let Some(fdm) = defm.fields.get_mut(ctx.field_index)
                                             {
-                                                fdm.array_element = Some(
-                                                    PointerTarget::FieldType(FieldType::UInt32),
-                                                );
+                                                fdm.array_element = Some(PointerTarget::FieldType(
+                                                    FieldType::UInt32,
+                                                ));
                                             }
                                         }
                                     } else if let Some(defm) =
                                         ms.class_registry.get_mut(ctx.owner_class_id)
                                     {
-                                        if let Some(fdm) = defm.fields.get_mut(ctx.field_index)
-                                        {
-                                            fdm.array_element =
-                                                Some(PointerTarget::FieldType(t));
+                                        if let Some(fdm) = defm.fields.get_mut(ctx.field_index) {
+                                            fdm.array_element = Some(PointerTarget::FieldType(t));
                                         }
                                     }
                                     self.schedule_rebuild();
