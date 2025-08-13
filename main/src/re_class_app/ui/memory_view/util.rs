@@ -45,10 +45,14 @@ pub fn text_edit_autowidth(ui: &mut Ui, text: &mut String) -> egui::Response {
     )
 }
 
-pub fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -> Option<String> {
+pub fn field_value_string(
+    handle: Option<Arc<AppHandle>>,
+    field: &MemoryField,
+    field_type: &FieldType,
+) -> Option<String> {
     let handle = handle.as_ref()?;
     let addr = field.address;
-    match field.field_type {
+    match field_type {
         FieldType::Hex64 => handle
             .read_sized::<u64>(addr)
             .ok()
@@ -87,7 +91,7 @@ pub fn field_value_string(handle: Option<Arc<AppHandle>>, field: &MemoryField) -
         FieldType::Double => handle.read_sized::<f64>(addr).ok().map(|v| format!("{v}")),
 
         FieldType::Vector3 | FieldType::Vector4 | FieldType::Vector2 => {
-            let len = field.get_size() as usize;
+            let len = field_type.get_size() as usize;
             let mut buf = vec![0u8; len];
             (handle.read_slice(addr, buf.as_mut_slice()).ok()).map(|_| {
                 buf.iter()

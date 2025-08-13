@@ -30,7 +30,13 @@ fn enum_suffix_for_field(
     field: &crate::memory::MemoryField,
     memory: &MSForSig,
 ) -> String {
-    if field.field_type != FieldType::Enum {
+    let is_enum = class_def
+        .fields
+        .iter()
+        .find(|fd| fd.id == field.def_id)
+        .map(|fd| fd.field_type == FieldType::Enum)
+        .unwrap_or(false);
+    if !is_enum {
         return String::new();
     }
     let def = match class_def.fields.iter().find(|fd| fd.id == field.def_id) {
@@ -196,18 +202,23 @@ impl ReClassGui {
             .unwrap();
         let def_ids: Vec<u64> = class_def.fields.iter().map(|fd| fd.id).collect();
         for (idx, field) in instance.fields.iter_mut().enumerate() {
-            match field.field_type {
+            let fd_opt = class_def.fields.get(idx);
+            let field_type = fd_opt
+                .map(|fd| fd.field_type.clone())
+                .unwrap_or(FieldType::Hex8);
+            match field_type {
                 FieldType::Pointer => {
                     let def_id = *def_ids.get(idx).unwrap_or(&0);
-                    if matches!(field.pointer_target, Some(PointerTarget::ClassId(_))) {
+                    let ptr_target = fd_opt.and_then(|fd| fd.pointer_target.clone());
+                    if matches!(ptr_target, Some(PointerTarget::ClassId(_))) {
                         let offset_from_class = field.address.saturating_sub(instance.address);
                         let mut header = format!(
                             "+0x{:04X}  0x{:08X}    {}: Pointer",
                             offset_from_class,
                             field.address,
-                            field.name.clone().unwrap_or_default()
+                            fd_opt.and_then(|fd| fd.name.clone()).unwrap_or_default()
                         );
-                        if let Some(PointerTarget::ClassId(cid)) = &field.pointer_target {
+                        if let Some(PointerTarget::ClassId(cid)) = &ptr_target {
                             let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
                                 if let Some(cd) = ms.class_registry.get_by_id(*cid) {
                                     cd.name.clone()
@@ -223,14 +234,16 @@ impl ReClassGui {
                             if let Ok(ptr) = h.read_sized::<u64>(field.address) {
                                 header.push_str(&format!(" (-> 0x{ptr:016X})"));
                                 if ptr != 0 {
-                                    match &field.pointer_target {
+                                    match &ptr_target {
                                         Some(PointerTarget::ClassId(cid)) => {
                                             let ms = unsafe { &mut *mem_ptr };
                                             if let Some(class_def) =
                                                 ms.class_registry.get_by_id(*cid).cloned()
                                             {
                                                 let mut nested = ClassInstance::new(
-                                                    field.name.clone().unwrap_or_default(),
+                                                    fd_opt
+                                                        .and_then(|fd| fd.name.clone())
+                                                        .unwrap_or_default(),
                                                     ptr,
                                                     class_def,
                                                 );
@@ -261,7 +274,11 @@ impl ReClassGui {
                                     };
                                     let mut fname =
                                         self.field_name_buffers.get(&key).cloned().unwrap_or_else(
-                                            || field.name.clone().unwrap_or_default(),
+                                            || {
+                                                fd_opt
+                                                    .and_then(|fd| fd.name.clone())
+                                                    .unwrap_or_default()
+                                            },
                                         );
                                     let resp = text_edit_autowidth(ui, &mut fname);
                                     if resp.changed() {
@@ -271,7 +288,6 @@ impl ReClassGui {
                                         .input(|i| i.key_pressed(egui::Key::Enter))
                                         && ui.memory(|m| m.has_focus(resp.id));
                                     if resp.lost_focus() || enter_on_this {
-                                        field.name = Some(fname.clone());
                                         let ms = unsafe { &mut *mem_ptr };
                                         if let Some(def) =
                                             ms.class_registry.get_mut(instance.class_id)
@@ -310,7 +326,7 @@ impl ReClassGui {
                             );
                         }
                         self.context_menu_for_field(&collapsing.header_response, ctx);
-                    } else if matches!(field.pointer_target, Some(PointerTarget::Array { .. })) {
+                    } else if matches!(ptr_target, Some(PointerTarget::Array { .. })) {
                         // Pointer to Array: show a header with element info and expand to elements
                         let def_id = *def_ids.get(idx).unwrap_or(&0);
                         let mut header = {
@@ -319,7 +335,7 @@ impl ReClassGui {
                                 "+0x{:04X}  0x{:08X}    {}: Pointer -> Array",
                                 offset_from_class,
                                 field.address,
-                                field.name.clone().unwrap_or_default()
+                                fd_opt.and_then(|fd| fd.name.clone()).unwrap_or_default()
                             );
                             if let Some(hd) = &handle {
                                 if let Ok(ptr) = hd.read_sized::<u64>(field.address) {
@@ -328,9 +344,7 @@ impl ReClassGui {
                             }
                             h
                         };
-                        if let Some(PointerTarget::Array { element, length }) =
-                            &field.pointer_target
-                        {
+                        if let Some(PointerTarget::Array { element, length }) = &ptr_target {
                             let desc = match element.as_ref() {
                                 PointerTarget::FieldType(t) => format!("{}", t),
                                 PointerTarget::EnumId(eid) => {
@@ -364,7 +378,7 @@ impl ReClassGui {
                             .id_source(("ptr_arr_field", def_id, path.clone()))
                             .show(ui, |ui| {
                                 if let (Some(hd), Some(PointerTarget::Array { element, length })) =
-                                    (handle.as_ref(), &field.pointer_target)
+                                    (handle.as_ref(), &ptr_target)
                                 {
                                     if let Ok(ptr) = hd.read_sized::<u64>(field.address) {
                                         if ptr != 0 {
@@ -561,9 +575,10 @@ impl ReClassGui {
                                                                 let mut nested = ClassInstance::new(
                                                                     format!(
                                                                         "{}[{}]",
-                                                                        field
-                                                                            .name
-                                                                            .clone()
+                                                                        fd_opt
+                                                                            .and_then(|fd| fd
+                                                                                .name
+                                                                                .clone())
                                                                             .unwrap_or_default(),
                                                                         i
                                                                     ),
@@ -625,7 +640,7 @@ impl ReClassGui {
                                 "+0x{:04X}  0x{:08X}",
                                 offset_from_class, field.address
                             ));
-                            if let Some(name) = field.name.clone() {
+                            if let Some(name) = fd_opt.and_then(|fd| fd.name.clone()) {
                                 let def_id = class_def.fields.get(idx).map(|fd| fd.id).unwrap_or(0);
                                 let key = FieldKey {
                                     instance_address: instance.address,
@@ -640,7 +655,6 @@ impl ReClassGui {
                                 let enter_on_this = ui.input(|i| i.key_pressed(egui::Key::Enter))
                                     && ui.memory(|m| m.has_focus(resp.id));
                                 if resp.lost_focus() || enter_on_this {
-                                    field.name = Some(fname.clone());
                                     let ms = unsafe { &mut *mem_ptr };
                                     if let Some(def) = ms.class_registry.get_mut(instance.class_id)
                                     {
@@ -651,9 +665,9 @@ impl ReClassGui {
                                     }
                                     self.field_name_buffers.remove(&key);
                                 }
-                                let type_label = match &field.pointer_target {
+                                let type_label = match &ptr_target {
                                     Some(PointerTarget::FieldType(t)) => {
-                                        format!(": {} -> {}", field.field_type, t)
+                                        format!(": {} -> {}", field_type, t)
                                     }
                                     Some(PointerTarget::ClassId(cid)) => {
                                         let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() }
@@ -666,7 +680,7 @@ impl ReClassGui {
                                         } else {
                                             format!("#{}", cid)
                                         };
-                                        format!(": {} -> {}", field.field_type, label)
+                                        format!(": {} -> {}", field_type, label)
                                     }
                                     Some(PointerTarget::EnumId(eid)) => {
                                         let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() }
@@ -679,15 +693,14 @@ impl ReClassGui {
                                         } else {
                                             format!("#{}", eid)
                                         };
-                                        format!(": {} -> {}", field.field_type, label)
+                                        format!(": {} -> {}", field_type, label)
                                     }
                                     Some(PointerTarget::Array { element, length }) => match element
                                         .as_ref()
                                     {
-                                        PointerTarget::FieldType(t) => format!(
-                                            ": {} -> Array [{}] {}",
-                                            field.field_type, length, t
-                                        ),
+                                        PointerTarget::FieldType(t) => {
+                                            format!(": {} -> Array [{}] {}", field_type, length, t)
+                                        }
                                         PointerTarget::EnumId(eid) => {
                                             let label = if let Some(ms) =
                                                 unsafe { (mem_ptr).as_ref() }
@@ -702,7 +715,7 @@ impl ReClassGui {
                                             };
                                             format!(
                                                 ": {} -> Array [{}] {}",
-                                                field.field_type, length, label
+                                                field_type, length, label
                                             )
                                         }
                                         PointerTarget::ClassId(cid) => {
@@ -720,16 +733,16 @@ impl ReClassGui {
                                             };
                                             format!(
                                                 ": {} -> Array [{}] {}",
-                                                field.field_type, length, label
+                                                field_type, length, label
                                             )
                                         }
                                         PointerTarget::Array { .. } => {
                                             String::from(": Pointer -> Array [..] Array")
                                         }
                                     },
-                                    None => format!(": {}", field.field_type),
+                                    None => format!(": {}", field_type),
                                 };
-                                let enum_suffix = if field.field_type == FieldType::Enum {
+                                let enum_suffix = if matches!(field_type, FieldType::Enum) {
                                     if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
                                         if let Some(fd) = class_def
                                             .fields
@@ -768,9 +781,9 @@ impl ReClassGui {
                                     format!("{type_label}{enum_suffix}"),
                                 );
                             } else {
-                                let type_label = match &field.pointer_target {
+                                let type_label = match &ptr_target {
                                     Some(PointerTarget::FieldType(t)) => {
-                                        format!("{} -> {}", field.field_type, t)
+                                        format!("{} -> {}", field_type, t)
                                     }
                                     Some(PointerTarget::ClassId(cid)) => {
                                         let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() }
@@ -783,7 +796,7 @@ impl ReClassGui {
                                         } else {
                                             format!("#{}", cid)
                                         };
-                                        format!("{} -> {}", field.field_type, label)
+                                        format!("{} -> {}", field_type, label)
                                     }
                                     Some(PointerTarget::EnumId(eid)) => {
                                         let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() }
@@ -796,15 +809,14 @@ impl ReClassGui {
                                         } else {
                                             format!("#{}", eid)
                                         };
-                                        format!("{} -> {}", field.field_type, label)
+                                        format!("{} -> {}", field_type, label)
                                     }
                                     Some(PointerTarget::Array { element, length }) => match element
                                         .as_ref()
                                     {
-                                        PointerTarget::FieldType(t) => format!(
-                                            "{} -> Array [{}] {}",
-                                            field.field_type, length, t
-                                        ),
+                                        PointerTarget::FieldType(t) => {
+                                            format!("{} -> Array [{}] {}", field_type, length, t)
+                                        }
                                         PointerTarget::EnumId(eid) => {
                                             let label = if let Some(ms) =
                                                 unsafe { (mem_ptr).as_ref() }
@@ -819,7 +831,7 @@ impl ReClassGui {
                                             };
                                             format!(
                                                 "{} -> Array [{}] {}",
-                                                field.field_type, length, label
+                                                field_type, length, label
                                             )
                                         }
                                         PointerTarget::ClassId(cid) => {
@@ -837,16 +849,16 @@ impl ReClassGui {
                                             };
                                             format!(
                                                 "{} -> Array [{}] {}",
-                                                field.field_type, length, label
+                                                field_type, length, label
                                             )
                                         }
                                         PointerTarget::Array { .. } => {
                                             String::from("Pointer -> Array [..] Array")
                                         }
                                     },
-                                    None => format!("{}", field.field_type),
+                                    None => format!("{}", field_type),
                                 };
-                                let enum_suffix = if field.field_type == FieldType::Enum {
+                                let enum_suffix = if matches!(field_type, FieldType::Enum) {
                                     if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
                                         if let Some(fd) = class_def
                                             .fields
@@ -885,10 +897,33 @@ impl ReClassGui {
                                     format!("{type_label}{enum_suffix}"),
                                 );
                             }
-                            ui.label(
-                                RichText::new(format!(" ({} bytes)", field.get_size())).weak(),
-                            );
-                            if let Some(val) = field_value_string(handle.clone(), field) {
+                            let display_size: u64 = if matches!(field_type, FieldType::Enum) {
+                                if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                    if let Some(fd) =
+                                        class_def.fields.iter().find(|fdef| fdef.id == field.def_id)
+                                    {
+                                        if let Some(eid) = fd.enum_id {
+                                            if let Some(ed) = ms.enum_registry.get_by_id(eid) {
+                                                ed.default_size as u64
+                                            } else {
+                                                field_type.get_size()
+                                            }
+                                        } else {
+                                            field_type.get_size()
+                                        }
+                                    } else {
+                                        field_type.get_size()
+                                    }
+                                } else {
+                                    field_type.get_size()
+                                }
+                            } else {
+                                field_type.get_size()
+                            };
+                            ui.label(RichText::new(format!(" ({} bytes)", display_size)).weak());
+                            if let Some(val) =
+                                field_value_string(handle.clone(), field, &field_type)
+                            {
                                 ui.monospace(format!("= {val}"));
                             }
                         });
@@ -908,7 +943,7 @@ impl ReClassGui {
                             field_index: idx,
                             instance_address,
                             address: field.address,
-                            value_preview: field_value_string(handle.clone(), field),
+                            value_preview: field_value_string(handle.clone(), field, &field_type),
                         };
                         let id = ui.id().with(("row_ptr_prim", def_id, path.clone(), idx));
                         let resp = ui.interact(inner.response.rect, id, egui::Sense::click());
@@ -982,7 +1017,7 @@ impl ReClassGui {
                             format!(
                                 "0x{:08X}    {}: Array -> [{}] {}",
                                 field.address,
-                                field.name.clone().unwrap_or_default(),
+                                fd.name.clone().unwrap_or_default(),
                                 len,
                                 desc
                             ),
@@ -993,7 +1028,7 @@ impl ReClassGui {
                             format!(
                                 "0x{:08X}    {}: Array",
                                 field.address,
-                                field.name.clone().unwrap_or_default()
+                                fd_opt.and_then(|fd| fd.name.clone()).unwrap_or_default()
                             ),
                             0,
                         )
@@ -1190,7 +1225,9 @@ impl ReClassGui {
                                                     let mut nested = ClassInstance::new(
                                                         format!(
                                                             "{}[{}]",
-                                                            field.name.clone().unwrap_or_default(),
+                                                            fd_opt
+                                                                .and_then(|fd| fd.name.clone())
+                                                                .unwrap_or_default(),
                                                             i
                                                         ),
                                                         elem_addr,
@@ -1250,7 +1287,7 @@ impl ReClassGui {
                     let (fname_display, cname_display) =
                         if let Some(nested) = &field.nested_instance {
                             (
-                                field.name.clone().unwrap_or_default(),
+                                fd_opt.and_then(|fd| fd.name.clone()).unwrap_or_default(),
                                 unsafe { &*mem_ptr }
                                     .class_registry
                                     .get(nested.class_id)
@@ -1259,7 +1296,7 @@ impl ReClassGui {
                             )
                         } else {
                             (
-                                field.name.clone().unwrap_or_default(),
+                                fd_opt.and_then(|fd| fd.name.clone()).unwrap_or_default(),
                                 "ClassInstance".to_string(),
                             )
                         };
@@ -1283,7 +1320,7 @@ impl ReClassGui {
                                     .field_name_buffers
                                     .get(&key)
                                     .cloned()
-                                    .unwrap_or_else(|| field.name.clone().unwrap_or_default());
+                                    .unwrap_or_else(|| fd_opt.and_then(|fd| fd.name.clone()).unwrap_or_default());
                                 let resp = text_edit_autowidth(ui, &mut fname);
                                 if resp.changed() {
                                     self.field_name_buffers.insert(key, fname.clone());
@@ -1291,7 +1328,6 @@ impl ReClassGui {
                                 let enter_on_this = ui.input(|i| i.key_pressed(egui::Key::Enter))
                                     && ui.memory(|m| m.has_focus(resp.id));
                                 if resp.lost_focus() || enter_on_this {
-                                    field.name = Some(fname.clone());
                                     if let Some(nested) = field.nested_instance.as_mut() {
                                         nested.name = fname.clone();
                                     }
@@ -1394,7 +1430,7 @@ impl ReClassGui {
                             "+0x{:04X}  0x{:08X}",
                             offset_from_class, field.address
                         ));
-                        if let Some(name) = field.name.clone() {
+                        if let Some(name) = fd_opt.and_then(|fd| fd.name.clone()) {
                             let def_id = class_def.fields.get(idx).map(|fd| fd.id).unwrap_or(0);
                             let key = FieldKey {
                                 instance_address: instance.address,
@@ -1409,7 +1445,6 @@ impl ReClassGui {
                             let enter_on_this = ui.input(|i| i.key_pressed(egui::Key::Enter))
                                 && ui.memory(|m| m.has_focus(resp.id));
                             if resp.lost_focus() || enter_on_this {
-                                field.name = Some(fname.clone());
                                 let ms = unsafe { &mut *mem_ptr };
                                 if let Some(def) = ms.class_registry.get_mut(instance.class_id) {
                                     if let Some(fd) = def.fields.get_mut(idx) {
@@ -1426,7 +1461,7 @@ impl ReClassGui {
                             };
                             ui.colored_label(
                                 Color32::from_rgb(170, 190, 255),
-                                format!(": {}{}", field.field_type, enum_suffix),
+                                format!(": {}{}", field_type, enum_suffix),
                             );
                         } else {
                             let enum_suffix = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
@@ -1436,10 +1471,10 @@ impl ReClassGui {
                             };
                             ui.colored_label(
                                 Color32::from_rgb(170, 190, 255),
-                                format!("{}{}", field.field_type, enum_suffix),
+                                format!("{}{}", field_type, enum_suffix),
                             );
                         }
-                        let display_size: u64 = if field.field_type == FieldType::Enum {
+                        let display_size: u64 = if matches!(field_type, FieldType::Enum) {
                             if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
                                 if let Some(fd) =
                                     class_def.fields.iter().find(|fdef| fdef.id == field.def_id)
@@ -1448,22 +1483,22 @@ impl ReClassGui {
                                         if let Some(ed) = ms.enum_registry.get_by_id(eid) {
                                             ed.default_size as u64
                                         } else {
-                                            field.get_size()
+                                            field_type.get_size()
                                         }
                                     } else {
-                                        field.get_size()
+                                        field_type.get_size()
                                     }
                                 } else {
-                                    field.get_size()
+                                    field_type.get_size()
                                 }
                             } else {
-                                field.get_size()
+                                field_type.get_size()
                             }
                         } else {
-                            field.get_size()
+                            field_type.get_size()
                         };
                         ui.label(RichText::new(format!(" ({display_size} bytes)")).weak());
-                        let value_str = if field.field_type == FieldType::Enum {
+                        let value_str = if matches!(field_type, FieldType::Enum) {
                             if let (Some(h), Some(ms)) =
                                 (handle.as_ref(), unsafe { (mem_ptr).as_ref() })
                             {
@@ -1472,7 +1507,7 @@ impl ReClassGui {
                                 None
                             }
                         } else {
-                            field_value_string(handle.clone(), field)
+                            field_value_string(handle.clone(), field, &field_type)
                         };
                         if let Some(val) = value_str {
                             ui.monospace(format!("= {val}"));
@@ -1494,7 +1529,7 @@ impl ReClassGui {
                         field_index: idx,
                         instance_address,
                         address: field.address,
-                        value_preview: field_value_string(handle.clone(), field),
+                        value_preview: field_value_string(handle.clone(), field, &field_type),
                     };
                     let def_id = *def_ids.get(idx).unwrap_or(&0);
                     let id = ui.id().with(("row_field", def_id, path.clone(), idx));

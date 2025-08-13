@@ -250,8 +250,8 @@ impl ReClassGui {
                                 signatures: Vec<crate::re_class_app::app::AppSignature>,
                             }
                             if let Ok(mut wrapper) = serde_json::from_str::<AppSave>(&text) {
-                                wrapper.memory.class_registry.normalize_ids();
-                                wrapper.memory.enum_registry.normalize_ids();
+                                wrapper.memory.class_registry.reseed_id_counters();
+                                wrapper.memory.enum_registry.reseed_id_counters();
                                 wrapper.memory.create_nested_instances();
                                 self.app.set_memory_structure(wrapper.memory);
                                 self.app.signatures = wrapper.signatures;

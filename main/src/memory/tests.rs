@@ -279,25 +279,17 @@ mod memory_field_tests {
 
     #[test]
     fn test_memory_field_creation() {
-        let named_field =
-            MemoryField::new_named("test_field".to_string(), FieldType::Int32, 0x1000);
-        assert_eq!(named_field.name, Some("test_field".to_string()));
-        assert_eq!(named_field.field_type, FieldType::Int32);
-        assert_eq!(named_field.address, 0x1000);
-        assert!(named_field.data.is_none());
-        assert!(named_field.error.is_none());
-        assert!(!named_field.is_editing);
-
-        let hex_field = MemoryField::new_hex(FieldType::Hex64, 0x2000);
-        assert_eq!(hex_field.name, None);
-        assert_eq!(hex_field.field_type, FieldType::Hex64);
-        assert_eq!(hex_field.address, 0x2000);
+        let hex_field = MemoryField::new_hex(0x1000);
+        assert_eq!(hex_field.address, 0x1000);
+        assert!(hex_field.data.is_none());
+        assert!(hex_field.error.is_none());
+        assert!(!hex_field.is_editing);
     }
 
     #[test]
     fn test_memory_field_size() {
-        let field = MemoryField::new_named("test".to_string(), FieldType::Int32, 0x1000);
-        assert_eq!(field.get_size(), 4);
+        let field = MemoryField::new_hex(0x1000);
+        assert_eq!(field.address, 0x1000);
     }
 }
 
@@ -337,14 +329,15 @@ mod class_instance_tests {
         class_def.add_named_field("health".to_string(), FieldType::Int32);
         class_def.add_named_field("name".to_string(), FieldType::TextPointer);
 
-        let instance = ClassInstance::new("TestInstance".to_string(), 0x1000, class_def);
+        let instance = ClassInstance::new("TestInstance".to_string(), 0x1000, class_def.clone());
 
-        let health_field = instance.get_field_by_name("health");
-        assert!(health_field.is_some());
-        assert_eq!(health_field.unwrap().field_type, FieldType::Int32);
-
-        let non_existent = instance.get_field_by_name("non_existent");
-        assert!(non_existent.is_none());
+        // Locate by definition name manually
+        let idx = class_def
+            .fields
+            .iter()
+            .position(|fd| fd.name.as_deref() == Some("health"))
+            .unwrap();
+        assert_eq!(instance.fields[idx].address, 0x1000);
     }
 
     #[test]
@@ -357,7 +350,7 @@ mod class_instance_tests {
 
         let first_field = instance.get_field_by_index(0);
         assert!(first_field.is_some());
-        assert_eq!(first_field.unwrap().field_type, FieldType::Int32);
+        assert_eq!(first_field.unwrap().address, 0x1000);
 
         let out_of_bounds = instance.get_field_by_index(2);
         assert!(out_of_bounds.is_none());
@@ -541,7 +534,6 @@ mod memory_structure_tests {
 
         assert_eq!(ms.root_class.fields.len(), 1);
         let f = &ms.root_class.fields[0];
-        assert_eq!(f.field_type, FieldType::ClassInstance);
         assert!(f.nested_instance.is_some());
         assert_eq!(
             ms.class_registry
@@ -597,7 +589,6 @@ mod memory_structure_tests {
             1
         );
         let f = &ms.root_class.fields[0];
-        assert_eq!(f.field_type, FieldType::ClassInstance);
         let nested_before = f.nested_instance.as_ref().expect("nested before rename");
         assert_eq!(
             ms.class_registry.get(nested_before.class_id).unwrap().name,
@@ -693,29 +684,23 @@ mod integration_tests {
 
         let structure = MemoryStructure::new("RootInstance".to_string(), 0x1000, class_def);
 
-        // Test field lookup by name
-        let health_field = structure.root_class.get_field_by_name("health");
-        assert!(health_field.is_some());
-        assert_eq!(health_field.unwrap().field_type, FieldType::Int32);
-        assert_eq!(health_field.unwrap().address, 0x1000);
-
-        let name_field = structure.root_class.get_field_by_name("name");
-        assert!(name_field.is_some());
-        assert_eq!(name_field.unwrap().field_type, FieldType::TextPointer);
-        assert_eq!(name_field.unwrap().address, 0x1004); // 0x1000 + 4 (Int32 size)
-
         // Test field lookup by index
         let first_field = structure.root_class.get_field_by_index(0);
         assert!(first_field.is_some());
-        assert_eq!(first_field.unwrap().field_type, FieldType::Int32);
+        assert_eq!(first_field.unwrap().address, 0x1000);
 
         let second_field = structure.root_class.get_field_by_index(1);
         assert!(second_field.is_some());
-        assert_eq!(second_field.unwrap().field_type, FieldType::TextPointer);
+        assert_eq!(second_field.unwrap().address, 0x1004);
 
         let third_field = structure.root_class.get_field_by_index(2);
         assert!(third_field.is_some());
-        assert_eq!(third_field.unwrap().field_type, FieldType::Hex64);
+        // validate via definition
+        let root_def = structure
+            .class_registry
+            .get(structure.root_class.class_id)
+            .unwrap();
+        assert_eq!(root_def.fields[2].field_type, FieldType::Hex64);
     }
 
     #[test]
@@ -727,10 +712,14 @@ mod integration_tests {
 
         let structure = MemoryStructure::new("RootInstance".to_string(), 0x1000, class_def);
 
-        // Test individual field sizes
-        assert_eq!(structure.root_class.fields[0].get_size(), 4);
-        assert_eq!(structure.root_class.fields[1].get_size(), 8);
-        assert_eq!(structure.root_class.fields[2].get_size(), 8);
+        // Test individual field sizes via definition
+        let def = structure
+            .class_registry
+            .get(structure.root_class.class_id)
+            .unwrap();
+        assert_eq!(def.fields[0].get_size(), 4);
+        assert_eq!(def.fields[1].get_size(), 8);
+        assert_eq!(def.fields[2].get_size(), 8);
 
         // Test total class size (excluding dynamic fields)
         assert_eq!(structure.root_class.get_size(), 20); // 4 + 8 + 8
@@ -748,19 +737,17 @@ mod integration_tests {
         struct AppSave {
             memory: MemoryStructure,
         }
-        let mut ms: MemoryStructure =
-            if let Ok(mut wrapper) = serde_json::from_str::<AppSave>(&json) {
-                wrapper.memory.class_registry.normalize_ids();
-                wrapper.memory.enum_registry.normalize_ids();
+        let mut ms: MemoryStructure = match serde_json::from_str::<AppSave>(&json) {
+            Ok(mut wrapper) => {
+                wrapper.memory.class_registry.reseed_id_counters();
+                wrapper.memory.enum_registry.reseed_id_counters();
                 wrapper.memory.create_nested_instances();
                 wrapper.memory
-            } else {
-                let mut mm: MemoryStructure = serde_json::from_str(&json).expect("parse json");
-                mm.class_registry.normalize_ids();
-                mm.enum_registry.normalize_ids();
-                mm.create_nested_instances();
-                mm
-            };
+            }
+            Err(e) => {
+                panic!("Failed to parse json: {}", e);
+            }
+        };
 
         // Pick root definition and convert first Hex8 to ClassInstance using normal APIs
         // Find first hex field index
@@ -804,7 +791,6 @@ mod integration_tests {
 
         // Validate: field is ClassInstance and nested is freshly bound to target
         let f = &ms.root_class.fields[idx];
-        assert_eq!(f.field_type, FieldType::ClassInstance);
         let nested = f.nested_instance.as_ref().expect("nested instance created");
         assert_eq!(
             ms.class_registry.get(nested.class_id).unwrap().name,

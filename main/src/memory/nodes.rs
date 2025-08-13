@@ -11,59 +11,29 @@ use crate::memory::{
         ClassDefinitionRegistry,
         EnumDefinitionRegistry,
     },
-    types::{
-        FieldType,
-        PointerTarget,
-    },
+    types::FieldType,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryField {
     pub def_id: u64,
-    pub name: Option<String>, // None for hex fields
-    pub field_type: FieldType,
     pub address: u64,
     pub data: Option<Vec<u8>>,
     pub error: Option<String>,
     pub is_editing: bool,
     pub nested_instance: Option<ClassInstance>,
-    pub pointer_target: Option<PointerTarget>,
-    pub enum_size: Option<u8>,
 }
 
 impl MemoryField {
-    pub fn new_named(name: String, field_type: FieldType, address: u64) -> Self {
+    pub fn new_hex(address: u64) -> Self {
         Self {
             def_id: 0,
-            name: Some(name),
-            field_type,
             address,
             data: None,
             error: None,
             is_editing: false,
             nested_instance: None,
-            pointer_target: None,
-            enum_size: None,
         }
-    }
-
-    pub fn new_hex(field_type: FieldType, address: u64) -> Self {
-        Self {
-            def_id: 0,
-            name: None,
-            field_type,
-            address,
-            data: None,
-            error: None,
-            is_editing: false,
-            nested_instance: None,
-            pointer_target: None,
-            enum_size: None,
-        }
-    }
-
-    pub fn get_size(&self) -> u64 {
-        self.field_type.get_size()
     }
 }
 
@@ -95,19 +65,8 @@ impl ClassInstance {
         for field_def in &class_definition.fields {
             let field_address = self.address + field_def.offset;
 
-            let mut memory_field = match &field_def.name {
-                Some(name) => MemoryField::new_named(
-                    name.clone(),
-                    field_def.field_type.clone(),
-                    field_address,
-                ),
-                None => MemoryField::new_hex(field_def.field_type.clone(), field_address),
-            };
+            let mut memory_field = MemoryField::new_hex(field_address);
             memory_field.def_id = field_def.id;
-            // Copy pointer target metadata for convenience when rendering
-            if field_def.field_type == FieldType::Pointer {
-                memory_field.pointer_target = field_def.pointer_target.clone();
-            }
 
             self.fields.push(memory_field);
 
@@ -118,14 +77,6 @@ impl ClassInstance {
 
         self.total_size = current_offset;
     }
-
-    #[cfg(test)]
-    pub fn get_field_by_name(&self, name: &str) -> Option<&MemoryField> {
-        self.fields
-            .iter()
-            .find(|field| field.name.as_ref().map(|n| n == name).unwrap_or(false))
-    }
-
     #[cfg(test)]
     pub fn get_field_by_index(&self, index: usize) -> Option<&MemoryField> {
         self.fields.get(index)
@@ -297,12 +248,12 @@ impl MemoryStructure {
 
     fn build_nested_for_instance(registry: &ClassDefinitionRegistry, instance: &mut ClassInstance) {
         for field in &mut instance.fields {
-            if field.field_type == FieldType::ClassInstance {
-                let field_def_opt = registry
-                    .get_by_id(instance.class_id)
-                    .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id));
+            let field_def_opt = registry
+                .get_by_id(instance.class_id)
+                .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id));
 
-                if let Some(field_def) = field_def_opt {
+            if let Some(field_def) = field_def_opt {
+                if field_def.field_type == FieldType::ClassInstance {
                     let class_def_opt = if let Some(cid) = field_def.class_id {
                         registry.get_by_id(cid)
                     } else {
@@ -312,7 +263,7 @@ impl MemoryStructure {
                         // Always create a fresh instance and clear any stale nested linkage
                         field.nested_instance = None;
                         let mut nested_instance = ClassInstance::new(
-                            field.name.clone().unwrap_or_default(),
+                            field_def.name.clone().unwrap_or_default(),
                             field.address,
                             class_def.clone(),
                         );
@@ -326,11 +277,10 @@ impl MemoryStructure {
                         field.nested_instance = Some(nested_instance);
                         continue;
                     }
+                } else {
+                    // Ensure primitive fields do not retain stale nested instances
+                    field.nested_instance = None;
                 }
-                // If no mapping found, keep None
-            } else {
-                // Ensure primitive fields do not retain stale nested instances
-                field.nested_instance = None;
             }
         }
         Self::recalc_instance_layout(&EnumDefinitionRegistry::new(), registry, instance);
@@ -344,23 +294,22 @@ impl MemoryStructure {
         let mut current_offset: u64 = 0;
         for field in &mut instance.fields {
             field.address = instance.address + current_offset;
-            let advance = match field.field_type {
-                FieldType::ClassInstance => {
-                    if let Some(ref mut nested) = field.nested_instance {
-                        nested.address = field.address;
-                        Self::recalc_instance_layout(enum_registry, class_registry, nested);
-                        nested.total_size.min(1_048_576)
-                    } else {
-                        0
+            let fd_opt = class_registry
+                .get_by_id(instance.class_id)
+                .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id));
+            let advance = if let Some(fd) = fd_opt {
+                match fd.field_type {
+                    FieldType::ClassInstance => {
+                        if let Some(ref mut nested) = field.nested_instance {
+                            nested.address = field.address;
+                            Self::recalc_instance_layout(enum_registry, class_registry, nested);
+                            nested.total_size.min(1_048_576)
+                        } else {
+                            0
+                        }
                     }
-                }
-                FieldType::Array => {
-                    // Look up field definition for element and length
-                    let mut bytes: u64 = 0;
-                    if let Some(fd) = class_registry
-                        .get_by_id(instance.class_id)
-                        .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id))
-                    {
+                    FieldType::Array => {
+                        // Look up field definition for element and length
                         let len = fd.array_length.unwrap_or(0) as u64;
                         let elem_size: u64 = match &fd.array_element {
                             Some(crate::memory::types::PointerTarget::FieldType(t)) => t.get_size(),
@@ -377,25 +326,23 @@ impl MemoryStructure {
                             Some(crate::memory::types::PointerTarget::Array { .. }) => 0,
                             None => 0,
                         };
-                        bytes = elem_size.saturating_mul(len);
+                        elem_size.saturating_mul(len)
                     }
-                    bytes
-                }
-                FieldType::Enum => {
-                    let mut size_bytes: u64 = 4;
-                    if let Some(fd) = class_registry
-                        .get_by_id(instance.class_id)
-                        .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id))
-                    {
+                    FieldType::Enum => {
                         if let Some(eid) = fd.enum_id {
                             if let Some(ed) = enum_registry.get_by_id(eid) {
-                                size_bytes = ed.default_size as u64;
+                                ed.default_size as u64
+                            } else {
+                                4
                             }
+                        } else {
+                            4
                         }
                     }
-                    size_bytes
+                    _ => fd.field_type.get_size(),
                 }
-                _ => field.get_size(),
+            } else {
+                0
             };
             current_offset = current_offset.saturating_add(advance);
         }

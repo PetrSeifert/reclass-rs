@@ -1,9 +1,6 @@
-use std::{
-    collections::HashSet,
-    sync::atomic::{
-        AtomicU64,
-        Ordering,
-    },
+use std::sync::atomic::{
+    AtomicU64,
+    Ordering,
 };
 
 use serde::{
@@ -152,11 +149,6 @@ impl ClassDefinition {
         self.name = new_name;
     }
 
-    #[allow(dead_code)]
-    pub fn get_id(&self) -> u64 {
-        self.id
-    }
-
     fn recalculate_size(&mut self) {
         let mut running_offset: u64 = 0;
         for field in &mut self.fields {
@@ -168,19 +160,14 @@ impl ClassDefinition {
         self.total_size = running_offset;
     }
 
-    #[allow(dead_code)]
-    pub fn get_size(&self) -> u64 {
-        self.total_size
-    }
-
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn get_field_by_name(&self, name: &str) -> Option<&FieldDefinition> {
         self.fields
             .iter()
             .find(|field| field.name.as_ref().map(|n| n == name).unwrap_or(false))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn get_field_by_index(&self, index: usize) -> Option<&FieldDefinition> {
         self.fields.get(index)
     }
@@ -316,10 +303,6 @@ impl EnumDefinitionRegistry {
         // Bump to the next id to avoid collisions on new creations
         ENUM_DEF_ID_COUNTER.store(max_enum_id.saturating_add(1), Ordering::Relaxed);
     }
-
-    pub fn normalize_ids(&mut self) {
-        self.reseed_id_counters();
-    }
 }
 
 impl Default for EnumDefinitionRegistry {
@@ -385,25 +368,6 @@ impl ClassDefinitionRegistry {
         // Bump to next id to avoid collisions on new creations
         FIELD_ID_COUNTER.store(max_field_id.saturating_add(1), Ordering::Relaxed);
         CLASS_DEF_ID_COUNTER.store(max_class_id.saturating_add(1), Ordering::Relaxed);
-    }
-
-    pub fn normalize_ids(&mut self) {
-        for def in self.definitions.values_mut() {
-            let mut seen_field_ids: HashSet<u64> = HashSet::new();
-            for f in &mut def.fields {
-                if !seen_field_ids.insert(f.id) {
-                    // Duplicate id; assign a fresh one not in seen
-                    let mut new_id = next_field_id();
-                    while seen_field_ids.contains(&new_id) {
-                        new_id = next_field_id();
-                    }
-                    f.id = new_id;
-                    seen_field_ids.insert(new_id);
-                }
-            }
-        }
-        // After normalization, reseed counters for future creations
-        self.reseed_id_counters();
     }
 
     pub fn get_by_id(&self, id: u64) -> Option<&ClassDefinition> {
