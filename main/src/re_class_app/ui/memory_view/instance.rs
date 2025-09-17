@@ -759,6 +759,289 @@ impl ReClassGui {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn render_encrypted_pointer_field(
+        &mut self,
+        ui: &mut Ui,
+        instance_address: u64,
+        instance_class_id: u64,
+        handle: Option<Arc<AppHandle>>,
+        mem_ptr: *mut MemoryStructure,
+        path: &mut Vec<usize>,
+        idx: usize,
+        field: &mut crate::memory::MemoryField,
+        class_def: &ClassDefinition,
+        def_ids: &[u64],
+    ) {
+        let fd_opt = class_def.fields.get(idx);
+        let def_id = *def_ids.get(idx).unwrap_or(&0);
+        let ptr_target = fd_opt.and_then(|fd| fd.pointer_target.clone());
+
+        // Decrypt current pointer value if possible
+        let mut decrypted_ptr: Option<u64> = None;
+        if let Some(h) = &handle {
+            if let Ok(enc) = h.read_sized::<u64>(field.address) {
+                let _ = self
+                    .app
+                    .ensure_decryptor("TslGame.exe")
+                    .map_err(|e| log::warn!("decryptor init failed: {}", e));
+                if let Some(dec) = self.app.decryptor.as_ref() {
+                    unsafe {
+                        decrypted_ptr = Some(dec.decrypt(enc));
+                    }
+                }
+            }
+        }
+
+        if matches!(ptr_target, Some(PointerTarget::ClassId(_))) {
+            let offset_from_class = field.address.saturating_sub(instance_address);
+            let mut header = format!(
+                "+0x{:04X}  0x{:08X}    {}: {}",
+                offset_from_class,
+                field.address,
+                fd_opt.and_then(|fd| fd.name.clone()).unwrap_or_default(),
+                FieldType::EncryptedPointer,
+            );
+            if let Some(PointerTarget::ClassId(cid)) = &ptr_target {
+                let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                    if let Some(cd) = ms.class_registry.get_by_id(*cid) {
+                        cd.name.clone()
+                    } else {
+                        format!("#{}", cid)
+                    }
+                } else {
+                    format!("#{}", cid)
+                };
+                header.push_str(&format!(" -> {}", label));
+            }
+            if let Some(ptr) = decrypted_ptr {
+                header.push_str(&format!(" (-> 0x{ptr:016X})"));
+                if ptr != 0 {
+                    if let Some(PointerTarget::ClassId(cid)) = &ptr_target {
+                        let ms = unsafe { &mut *mem_ptr };
+                        if let Some(class_def) = ms.class_registry.get_by_id(*cid).cloned() {
+                            let mut nested = ClassInstance::new(
+                                fd_opt
+                                    .and_then(|fd| fd.name.clone())
+                                    .unwrap_or_default(),
+                                ptr,
+                                class_def,
+                            );
+                            ms.bind_nested_for_instance(&mut nested);
+                            field.nested_instance = Some(nested);
+                        } else {
+                            field.nested_instance = None;
+                        }
+                    }
+                } else {
+                    field.nested_instance = None;
+                }
+            }
+            let collapsing = egui::CollapsingHeader::new(header)
+                .default_open(false)
+                .id_source(("enc_ptr_field", def_id, path.clone()))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        self.render_field_name_inline_editor(
+                            ui,
+                            mem_ptr,
+                            instance_class_id,
+                            instance_address,
+                            def_id,
+                            idx,
+                            fd_opt.and_then(|fd| fd.name.clone()),
+                            true,
+                        );
+                    });
+                    if let Some(nested) = field.nested_instance.as_mut() {
+                        ui.separator();
+                        path.push(idx);
+                        self.render_instance(ui, nested, handle.clone(), mem_ptr, path);
+                        path.pop();
+                    }
+                });
+            let ctx = FieldCtx {
+                mem_ptr,
+                owner_class_id: instance_class_id,
+                field_index: idx,
+                instance_address,
+                address: field.address,
+                value_preview: None,
+            };
+            if collapsing.header_response.clicked() {
+                self.update_selection_for_click(ui, instance_address, idx, def_ids, def_id);
+            }
+            self.context_menu_for_field(&collapsing.header_response, ctx);
+            return;
+        }
+
+        // Default: single line row showing decrypted value
+        let inner = ui.horizontal(|ui| {
+            let offset_from_class = field.address.saturating_sub(instance_address);
+            ui.monospace(format!(
+                "+0x{:04X}  0x{:08X}",
+                offset_from_class, field.address
+            ));
+            if let Some(name) = fd_opt.and_then(|fd| fd.name.clone()) {
+                self.render_field_name_inline_editor(
+                    ui,
+                    mem_ptr,
+                    instance_class_id,
+                    instance_address,
+                    def_id,
+                    idx,
+                    Some(name),
+                    false,
+                );
+                let ptr_target = fd_opt.and_then(|fd| fd.pointer_target.clone());
+                let type_label = match &ptr_target {
+                    Some(PointerTarget::FieldType(t)) => {
+                        format!(": {} -> {}", FieldType::EncryptedPointer, t)
+                    }
+                    Some(PointerTarget::ClassId(cid)) => {
+                        let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                            if let Some(cd) = ms.class_registry.get_by_id(*cid) {
+                                cd.name.clone()
+                            } else {
+                                format!("#{}", cid)
+                            }
+                        } else {
+                            format!("#{}", cid)
+                        };
+                        format!(": {} -> {}", FieldType::EncryptedPointer, label)
+                    }
+                    Some(PointerTarget::EnumId(eid)) => {
+                        let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                            if let Some(ed) = ms.enum_registry.get_by_id(*eid) {
+                                ed.name.clone()
+                            } else {
+                                format!("#{}", eid)
+                            }
+                        } else {
+                            format!("#{}", eid)
+                        };
+                        format!(": {} -> {}", FieldType::EncryptedPointer, label)
+                    }
+                    Some(PointerTarget::Array { element, length }) => match element.as_ref() {
+                        PointerTarget::FieldType(t) => {
+                            format!(": {} -> Array [{}] {}", FieldType::EncryptedPointer, length, t)
+                        }
+                        PointerTarget::EnumId(eid) => {
+                            let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                if let Some(ed) = ms.enum_registry.get_by_id(*eid) {
+                                    ed.name.clone()
+                                } else {
+                                    format!("#{}", eid)
+                                }
+                            } else {
+                                format!("#{}", eid)
+                            };
+                            format!(": {} -> Array [{}] {}", FieldType::EncryptedPointer, length, label)
+                        }
+                        PointerTarget::ClassId(cid) => {
+                            let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                if let Some(cd) = ms.class_registry.get_by_id(*cid) {
+                                    cd.name.clone()
+                                } else {
+                                    format!("#{}", cid)
+                                }
+                            } else {
+                                format!("#{}", cid)
+                            };
+                            format!(": {} -> Array [{}] {}", FieldType::EncryptedPointer, length, label)
+                        }
+                        PointerTarget::Array { .. } => {
+                            String::from(": EncPointer -> Array [..] Array")
+                        }
+                    },
+                    None => format!(": {}", FieldType::EncryptedPointer),
+                };
+                ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
+            } else {
+                let ptr_target = fd_opt.and_then(|fd| fd.pointer_target.clone());
+                let type_label = match &ptr_target {
+                    Some(PointerTarget::FieldType(t)) => {
+                        format!("{} -> {}", FieldType::EncryptedPointer, t)
+                    }
+                    Some(PointerTarget::ClassId(cid)) => {
+                        let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                            if let Some(cd) = ms.class_registry.get_by_id(*cid) {
+                                cd.name.clone()
+                            } else {
+                                format!("#{}", cid)
+                            }
+                        } else {
+                            format!("#{}", cid)
+                        };
+                        format!("{} -> {}", FieldType::EncryptedPointer, label)
+                    }
+                    Some(PointerTarget::EnumId(eid)) => {
+                        let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                            if let Some(ed) = ms.enum_registry.get_by_id(*eid) {
+                                ed.name.clone()
+                            } else {
+                                format!("#{}", eid)
+                            }
+                        } else {
+                            format!("#{}", eid)
+                        };
+                        format!("{} -> {}", FieldType::EncryptedPointer, label)
+                    }
+                    Some(PointerTarget::Array { element, length }) => match element.as_ref() {
+                        PointerTarget::FieldType(t) => {
+                            format!("{} -> Array [{}] {}", FieldType::EncryptedPointer, length, t)
+                        }
+                        PointerTarget::EnumId(eid) => {
+                            let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                if let Some(ed) = ms.enum_registry.get_by_id(*eid) {
+                                    ed.name.clone()
+                                } else {
+                                    format!("#{}", eid)
+                                }
+                            } else {
+                                format!("#{}", eid)
+                            };
+                            format!("{} -> Array [{}] {}", FieldType::EncryptedPointer, length, label)
+                        }
+                        PointerTarget::ClassId(cid) => {
+                            let label = if let Some(ms) = unsafe { (mem_ptr).as_ref() } {
+                                if let Some(cd) = ms.class_registry.get_by_id(*cid) {
+                                    cd.name.clone()
+                                } else {
+                                    format!("#{}", cid)
+                                }
+                            } else {
+                                format!("#{}", cid)
+                            };
+                            format!("{} -> Array [{}] {}", FieldType::EncryptedPointer, length, label)
+                        }
+                        PointerTarget::Array { .. } => {
+                            String::from("EncPointer -> Array [..] Array")
+                        }
+                    },
+                    None => format!("{}", FieldType::EncryptedPointer),
+                };
+                ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
+            }
+            let display_size = FieldType::EncryptedPointer.get_size();
+            ui.label(RichText::new(format!(" ({} bytes)", display_size)).weak());
+            if let Some(ptr) = decrypted_ptr {
+                ui.monospace(format!("= 0x{ptr:016X}"));
+            }
+        });
+        let rect = inner.response.rect;
+        let ctx = FieldCtx {
+            mem_ptr,
+            owner_class_id: instance_class_id,
+            field_index: idx,
+            instance_address,
+            address: field.address,
+            value_preview: None,
+        };
+        self.paint_row_and_handle_selection(ui, rect, idx, "enc_ptr_field", def_id, path, instance_address, def_ids, ctx);
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn render_array_field(
         &mut self,
         ui: &mut Ui,
@@ -1361,6 +1644,18 @@ impl ReClassGui {
                 .unwrap_or(FieldType::Hex8);
             match field_type {
                 FieldType::Pointer => self.render_pointer_field(
+                    ui,
+                    instance.address,
+                    instance.class_id,
+                    handle.clone(),
+                    mem_ptr,
+                    path,
+                    idx,
+                    field,
+                    class_def,
+                    &def_ids,
+                ),
+                FieldType::EncryptedPointer => self.render_encrypted_pointer_field(
                     ui,
                     instance.address,
                     instance.class_id,

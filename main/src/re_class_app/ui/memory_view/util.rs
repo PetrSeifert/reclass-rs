@@ -115,6 +115,7 @@ pub fn field_value_string(
         }
 
         FieldType::Pointer => None,
+        FieldType::EncryptedPointer => None,
         FieldType::Array => None,
         FieldType::ClassInstance => None,
         FieldType::Enum => None,

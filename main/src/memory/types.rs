@@ -48,6 +48,9 @@ pub enum FieldType {
     // Generic pointer (64-bit) that can point to any primitive type or class instance
     Pointer,
 
+    // Encrypted pointer (64-bit) whose value must be decrypted before dereference
+    EncryptedPointer,
+
     // Enum type (32-bit underlying by default)
     Enum,
 
@@ -71,7 +74,7 @@ impl FieldType {
             FieldType::Vector4 => 16,
             FieldType::Text => 32,
             FieldType::TextPointer => 8,
-            FieldType::Pointer => 8,
+            FieldType::Pointer | FieldType::EncryptedPointer => 8,
             FieldType::Enum => 4,
             FieldType::Array => 0, // Dynamic size; depends on element and length
             FieldType::ClassInstance => 0, // Dynamic size
@@ -116,6 +119,7 @@ impl FieldType {
             FieldType::TextPointer => "TextPointer",
             FieldType::ClassInstance => "ClassInstance",
             FieldType::Pointer => "Pointer",
+            FieldType::EncryptedPointer => "EncPointer",
             FieldType::Enum => "Enum",
             FieldType::Array => "Array",
         }

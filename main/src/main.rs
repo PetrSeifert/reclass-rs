@@ -4,6 +4,7 @@ use eframe::{
 };
 
 mod memory;
+mod decrypt;
 mod re_class_app;
 
 fn main() -> Result<(), anyhow::Error> {

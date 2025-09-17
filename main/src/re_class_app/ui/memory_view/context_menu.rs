@@ -65,6 +65,7 @@ impl ReClassGui {
                             FieldType::Text,
                             FieldType::TextPointer,
                             FieldType::Pointer,
+                            FieldType::EncryptedPointer,
                             FieldType::Enum,
                             FieldType::Array,
                         ] {
@@ -202,6 +203,7 @@ impl ReClassGui {
                     FieldType::Text,
                     FieldType::TextPointer,
                     FieldType::Pointer,
+                    FieldType::EncryptedPointer,
                     FieldType::Enum,
                     FieldType::Array,
                 ] {
@@ -210,7 +212,7 @@ impl ReClassGui {
                         let ms = unsafe { &mut *ctx.mem_ptr };
                         if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                             def.set_field_type_at(ctx.field_index, t.clone());
-                            if t == FieldType::Pointer {
+                            if t == FieldType::Pointer || t == FieldType::EncryptedPointer {
                                 if let Some(fd) = def.fields.get_mut(ctx.field_index) {
                                     fd.pointer_target =
                                         Some(PointerTarget::FieldType(FieldType::Hex64));
@@ -451,7 +453,9 @@ impl ReClassGui {
             if let Some(ms) = unsafe { (ctx.mem_ptr).as_mut() } {
                 if let Some(def) = ms.class_registry.get_mut(ctx.owner_class_id) {
                     if let Some(fd) = def.fields.get(ctx.field_index) {
-                        if fd.field_type == FieldType::Pointer {
+                        if fd.field_type == FieldType::Pointer
+                            || fd.field_type == FieldType::EncryptedPointer
+                        {
                             ui.menu_button("Pointer target", |ui| {
                                 ui.menu_button("Primitive", |ui| {
                                     for t in [

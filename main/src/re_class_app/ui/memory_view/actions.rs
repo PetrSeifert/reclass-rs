@@ -140,7 +140,7 @@ impl ReClassGui {
                 .collect();
             for idx in indices {
                 def.set_field_type_at(idx, new_type.clone());
-                if new_type == FieldType::Pointer {
+                if new_type == FieldType::Pointer || new_type == FieldType::EncryptedPointer {
                     if let Some(fd) = def.fields.get_mut(idx) {
                         fd.pointer_target = Some(PointerTarget::FieldType(FieldType::Hex64));
                     }

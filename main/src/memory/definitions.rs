@@ -192,7 +192,7 @@ impl ClassDefinition {
             if new_type != FieldType::ClassInstance {
                 f.class_id = None;
             }
-            if new_type != FieldType::Pointer {
+            if new_type != FieldType::Pointer && new_type != FieldType::EncryptedPointer {
                 f.pointer_target = None;
             }
             if new_type != FieldType::Enum {

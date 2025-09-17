@@ -16,6 +16,7 @@ use vtd_libum::{
 };
 
 use crate::memory::MemoryStructure;
+use crate::decrypt::Decryptor;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AppSignature {
@@ -57,6 +58,7 @@ pub struct ReClassApp {
     pub process_state: ProcessState,
     pub memory_structure: Option<MemoryStructure>,
     pub signatures: Vec<AppSignature>,
+    pub decryptor: Option<Decryptor>,
 }
 
 impl ReClassApp {
@@ -73,6 +75,7 @@ impl ReClassApp {
             process_state: ProcessState::new(),
             memory_structure: None,
             signatures: Vec::new(),
+            decryptor: None,
         })
     }
 
@@ -83,6 +86,8 @@ impl ReClassApp {
 
     pub fn create_handle(&mut self, process_id: ProcessId) -> anyhow::Result<()> {
         self.handle = Some(AppHandle::create(self.ke_interface.clone(), process_id)?);
+        // Reset decryptor when switching processes
+        self.decryptor = None;
         Ok(())
     }
 
@@ -143,6 +148,20 @@ impl ReClassApp {
             handle::Signature::offset(&sig.name, &sanitized, sig.offset)
         };
         handle.resolve_signature(&sig.module, &sig_def).ok()
+    }
+
+    /// Initializes the decryptor if not already present. Returns true on success.
+    pub fn ensure_decryptor(&mut self, module_name: &str) -> anyhow::Result<bool> {
+        if self.decryptor.is_some() {
+            return Ok(true);
+        }
+        let handle = match &self.handle {
+            Some(h) => h.clone(),
+            None => return Ok(false),
+        };
+        let dec = Decryptor::create(&handle, module_name)?;
+        self.decryptor = Some(dec);
+        Ok(true)
     }
 }
 

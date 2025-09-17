@@ -131,7 +131,9 @@ impl eframe::App for ReClassGui {
                         for f in &def.fields {
                             if f.field_type == crate::memory::FieldType::ClassInstance {
                                 if let Some(cid) = f.class_id { if let Some(d) = ms.class_registry.get_by_id(cid) { referenced.insert(d.id); } }
-                            } else if f.field_type == crate::memory::FieldType::Pointer {
+                            } else if f.field_type == crate::memory::FieldType::Pointer
+                                || f.field_type == crate::memory::FieldType::EncryptedPointer
+                            {
                                 if let Some(pt) = &f.pointer_target {
                                     match pt {
                                         crate::memory::PointerTarget::ClassId(cid) => { if let Some(d) = ms.class_registry.get_by_id(*cid) { referenced.insert(d.id); } }
