@@ -1,0 +1,19 @@
+[package]
+name = "reclass-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+env_logger.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+reclass-core = { path = "../core" }
+tokio = { version = "1.53.1", features = ["full"] }
+axum = { version = "0.8.9", features = ["ws"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
+clap = { version = "4.6.7", features = ["derive"] }
+futures-util = "0.3.34"

@@ -1,0 +1,16 @@
+[package]
+name = "reclass-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+log.workspace = true
+raw_struct.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+vtd-libum.workspace = true
+windows-sys.workspace = true
+
+handle = { path = "../handle" }

@@ -146,4 +146,7 @@ pub enum PointerTarget {
         element: Box<PointerTarget>,
         length: u32,
     },
+    /// A pointer to the inner target. Used as an array element (e.g. `Player*[8]`),
+    /// since `FieldType(Pointer)` carries no pointee.
+    Pointer(Box<PointerTarget>),
 }

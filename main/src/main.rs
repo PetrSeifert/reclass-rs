@@ -3,9 +3,12 @@ use eframe::{
     NativeOptions,
 };
 
-mod memory;
-mod decrypt;
 mod re_class_app;
+
+use reclass_core::{
+    decrypt,
+    memory,
+};
 
 fn main() -> Result<(), anyhow::Error> {
     let native_options = NativeOptions {

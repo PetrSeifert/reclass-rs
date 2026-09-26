@@ -353,7 +353,7 @@ impl ReClassGui {
                             format!("#{}", cid)
                         }
                     }
-                    PointerTarget::Array { .. } => String::from("Array"),
+                    PointerTarget::Array { .. } | PointerTarget::Pointer(_) => String::from("Array"),
                 };
                 header.push_str(&format!(" [{}] {}", length, desc));
             }
@@ -564,7 +564,7 @@ impl ReClassGui {
                                             }
                                         }
                                     }
-                                    PointerTarget::Array { .. } => {}
+                                    PointerTarget::Array { .. } | PointerTarget::Pointer(_) => {}
                                 }
                             }
                         }
@@ -657,10 +657,11 @@ impl ReClassGui {
                                 };
                                 format!(": {} -> Array [{}] {}", FieldType::Pointer, length, label)
                             }
-                            PointerTarget::Array { .. } => {
+                            PointerTarget::Array { .. } | PointerTarget::Pointer(_) => {
                                 String::from(": Pointer -> Array [..] Array")
                             }
                         },
+                        Some(PointerTarget::Pointer(_)) => format!(": {} -> Pointer", FieldType::Pointer),
                         None => format!(": {}", FieldType::Pointer),
                     };
                     ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
@@ -722,10 +723,11 @@ impl ReClassGui {
                                 };
                                 format!("{} -> Array [{}] {}", FieldType::Pointer, length, label)
                             }
-                            PointerTarget::Array { .. } => {
+                            PointerTarget::Array { .. } | PointerTarget::Pointer(_) => {
                                 String::from("Pointer -> Array [..] Array")
                             }
                         },
+                        Some(PointerTarget::Pointer(_)) => format!("{} -> Pointer", FieldType::Pointer),
                         None => format!("{}", FieldType::Pointer),
                     };
                     ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
@@ -950,10 +952,11 @@ impl ReClassGui {
                             };
                             format!(": {} -> Array [{}] {}", FieldType::EncryptedPointer, length, label)
                         }
-                        PointerTarget::Array { .. } => {
+                        PointerTarget::Array { .. } | PointerTarget::Pointer(_) => {
                             String::from(": EncPointer -> Array [..] Array")
                         }
                     },
+                    Some(PointerTarget::Pointer(_)) => format!(": {} -> Pointer", FieldType::EncryptedPointer),
                     None => format!(": {}", FieldType::EncryptedPointer),
                 };
                 ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
@@ -1015,10 +1018,11 @@ impl ReClassGui {
                             };
                             format!("{} -> Array [{}] {}", FieldType::EncryptedPointer, length, label)
                         }
-                        PointerTarget::Array { .. } => {
+                        PointerTarget::Array { .. } | PointerTarget::Pointer(_) => {
                             String::from("EncPointer -> Array [..] Array")
                         }
                     },
+                    Some(PointerTarget::Pointer(_)) => format!("{} -> Pointer", FieldType::EncryptedPointer),
                     None => format!("{}", FieldType::EncryptedPointer),
                 };
                 ui.colored_label(Color32::from_rgb(170, 190, 255), type_label);
@@ -1082,6 +1086,7 @@ impl ReClassGui {
                     }
                 }
                 Some(PointerTarget::Array { .. }) => String::from("Array"),
+                Some(PointerTarget::Pointer(_)) => String::from("Pointer"),
                 None => String::from("<elem?>"),
             };
             (
@@ -1276,7 +1281,7 @@ impl ReClassGui {
                                 }
                             }
                         }
-                        Some(PointerTarget::Array { .. }) => {
+                        Some(PointerTarget::Array { .. }) | Some(PointerTarget::Pointer(_)) => {
                             ui.monospace("<nested array rendering not supported>");
                         }
                         Some(PointerTarget::ClassId(cid)) => {

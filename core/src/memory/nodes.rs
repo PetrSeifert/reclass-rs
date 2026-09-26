@@ -324,6 +324,7 @@ impl MemoryStructure {
                                     .unwrap_or(0)
                             }
                             Some(crate::memory::types::PointerTarget::Array { .. }) => 0,
+                            Some(crate::memory::types::PointerTarget::Pointer(_)) => 8,
                             None => 0,
                         };
                         elem_size.saturating_mul(len)
