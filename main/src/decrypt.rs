@@ -19,7 +19,7 @@ type XenuineDecrypt = unsafe extern "win64" fn(u64, u64) -> u64;
 
 /// Default RVA to the indirection that holds the XenuineDecrypt function pointer.
 /// Adjust as needed for your target.
-pub const DECRYPT_OFFSET: u64 = 0x0F2F5F28; // XenuineDecrypt
+pub const DECRYPT_OFFSET: u64 = 0x0F37D628; // XenuineDecrypt
 
 pub struct Decryptor {
     decrypt_key: u64,
