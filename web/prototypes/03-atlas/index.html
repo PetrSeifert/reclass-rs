@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>reclass-rs · Atlas</title>
+<style>
+  :root {
+    --bg: #f4f2ee; --card: #ffffff; --ink: #1c1b19; --ink2: #5b5850; --ink3: #9a968c; --line: #e6e2d9; --line2: #d9d4c8;
+    --accent: #2f5bea; --accent-soft: #e8eefe; --good: #1f8a4c; --bad: #c8372d;
+    --k-hex: #9a968c; --k-int: #2f8f5b; --k-uint: #2f8f5b; --k-float: #d0701c; --k-vec: #b8860b; --k-ptr: #7a4fd6; --k-text: #13898a; --k-enum: #2f5bea; --k-bool: #c2417a; --k-class: #13898a; --k-array: #13898a;
+    --t-hex: #efece6; --t-int: #e3f3e9; --t-uint: #e3f3e9; --t-float: #fcebdc; --t-vec: #f8f0d4; --t-ptr: #ece5fb; --t-text: #dff2f2; --t-enum: #e5ebfd; --t-bool: #f9e4ee; --t-class: #dff2f2; --t-array: #dff2f2;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+    --ui: Inter, "Segoe UI", system-ui, sans-serif;
+    --shadow: 0 1px 2px rgba(40,30,10,.06), 0 4px 16px rgba(40,30,10,.05);
+  }
+  body.dark {
+    --bg: #141414; --card: #1c1c1c; --ink: #ecebe8; --ink2: #b0ada5; --ink3: #75726b; --line: #2a2a2a; --line2: #353535; --accent: #7c9bff; --accent-soft: #1e2640;
+    --t-hex: #232323; --t-int: #16291e; --t-uint: #16291e; --t-float: #2f2115; --t-vec: #2b2612; --t-ptr: #251c3a; --t-text: #122a2a; --t-enum: #18213b; --t-bool: #33182a; --t-class: #122a2a; --t-array: #122a2a;
+    --k-hex: #807c73; --k-int: #5ccb8a; --k-uint: #5ccb8a; --k-float: #f39a4f; --k-vec: #e3b53c; --k-ptr: #a98bf5; --k-text: #3cc4c4; --k-enum: #7c9bff; --k-bool: #ec79ad; --k-class: #3cc4c4; --k-array: #3cc4c4;
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 13px/1.4 var(--ui); overflow: hidden; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
+
+  header { display: flex; align-items: center; gap: 14px; padding: 0 18px; border-bottom: 1px solid var(--line); background: var(--bg); }
+  .logo { font-weight: 700; letter-spacing: -.02em; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .logo i { width: 22px; height: 22px; border-radius: 6px; background: conic-gradient(from 45deg, #2f5bea, #7a4fd6, #13898a, #d0701c, #2f5bea); display: inline-block; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border: 1px solid var(--line2); border-radius: 999px; background: var(--card); font-size: 12px; cursor: pointer; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 20%, transparent); }
+  .nav { flex: 1; display: flex; align-items: center; gap: 6px; background: var(--card); border: 1px solid var(--line2); border-radius: 10px; padding: 4px 6px; box-shadow: var(--shadow); min-width: 0; }
+  .nav .nb { border: none; background: none; width: 28px; height: 28px; border-radius: 6px; color: var(--ink2); }
+  .nav .nb:hover:not(:disabled) { background: var(--bg); }
+  .nav .nb:disabled { opacity: .3; cursor: default; }
+  .crumbs { display: flex; align-items: center; gap: 2px; overflow: hidden; white-space: nowrap; flex: 1; min-width: 0; }
+  .crumb { padding: 3px 8px; border-radius: 6px; cursor: pointer; display: inline-flex; gap: 6px; align-items: baseline; }
+  .crumb:hover { background: var(--bg); }
+  .crumb .f { color: var(--ink2); }
+  .crumb .c { font-weight: 600; }
+  .crumb .a { font: 11px var(--mono); color: var(--ink3); }
+  .crumb.last { background: var(--accent-soft); }
+  .sep { color: var(--ink3); }
+  .rootExpr { display: flex; align-items: center; gap: 6px; border-left: 1px solid var(--line); padding-left: 10px; }
+  .rootExpr input { border: none; outline: none; background: none; font: 12px var(--mono); color: var(--ink); width: 150px; }
+  .rootExpr .ok { font: 11px var(--mono); color: var(--good); } .rootExpr .bad { font: 11px var(--mono); color: var(--bad); }
+  .hbtn { border: 1px solid var(--line2); background: var(--card); border-radius: 8px; padding: 6px 10px; font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+  .hbtn:hover { border-color: var(--ink3); }
+  .hbtn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  .body { display: grid; grid-template-columns: 230px 1fr; min-height: 0; }
+  .rail { padding: 16px 12px; overflow: auto; border-right: 1px solid var(--line); }
+  .rail h4 { margin: 14px 8px 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink3); font-weight: 600; display: flex; }
+  .rail h4 button { margin-left: auto; border: none; background: none; color: var(--ink3); padding: 0; }
+  .rail h4 button:hover { color: var(--accent); }
+  .ci { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+  .ci:hover { background: var(--card); }
+  .ci.on { background: var(--card); box-shadow: var(--shadow); font-weight: 600; }
+  .ci .sw { width: 22px; height: 6px; border-radius: 3px; overflow: hidden; display: flex; flex: none; }
+  .ci .sw i { display: block; height: 100%; }
+  .ci .s { margin-left: auto; font: 11px var(--mono); color: var(--ink3); font-weight: 400; }
+  .ci .star { color: #d0a01c; font-size: 11px; }
+  .ci.unused { color: var(--ink3); }
+  .sig { padding: 7px 8px; border-radius: 8px; font-size: 12px; display: grid; grid-template-columns: 10px 1fr; gap: 0 8px; cursor: pointer; }
+  .sig:hover { background: var(--card); }
+  .sig .d { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; }
+  .sig .v { grid-column: 2; font: 11px var(--mono); color: var(--ink3); }
+  .sig.err .v { color: var(--bad); }
+
+  .work { display: grid; grid-template-rows: auto 1fr; min-height: 0; padding: 16px 18px 0; gap: 14px; }
+  .title { display: flex; align-items: flex-end; gap: 14px; }
+  .title h1 { margin: 0; font-size: 24px; letter-spacing: -.02em; font-weight: 700; }
+  .title .meta { color: var(--ink3); font: 12px var(--mono); padding-bottom: 4px; }
+  .title .sp { flex: 1; }
+  .strip { display: flex; height: 22px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line2); background: var(--card); margin-top: 10px; }
+  .strip i { display: block; height: 100%; border-right: 1px solid var(--card); cursor: pointer; transition: filter .1s; position: relative; }
+  .strip i:hover, .strip i.hl { filter: brightness(.9) saturate(1.4); }
+  .strip i.hl { box-shadow: inset 0 -3px var(--accent); }
+
+  .panes { display: grid; grid-template-columns: minmax(420px, 1fr) 610px; gap: 14px; min-height: 0; padding-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .card > .hd { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 12px; }
+  .card > .hd .sub { font-weight: 400; color: var(--ink3); }
+  .card > .hd .sp { flex: 1; }
+  .scroll { overflow: auto; min-height: 0; flex: 1; }
+
+  .fr { display: grid; grid-template-columns: 50px 1fr 118px minmax(120px, 1.3fr) 30px; align-items: center; gap: 10px; padding: 0 14px; height: 34px; border-bottom: 1px solid var(--line); cursor: default; position: relative; }
+  .fr:hover, .fr.hl { background: color-mix(in srgb, var(--accent-soft) 60%, transparent); }
+  .fr.sel { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+  .fr .o { font: 11px var(--mono); color: var(--ink3); }
+  .fr .n { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fr .n.anon { color: var(--ink3); font-weight: 400; font-style: italic; }
+  .fr .t { font: 11px var(--mono); padding: 2px 7px; border-radius: 5px; justify-self: start; white-space: nowrap; max-width: 118px; overflow: hidden; text-overflow: ellipsis; }
+  .fr .v { font: 12px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fr .v small { color: var(--ink3); margin-left: 8px; }
+  .fr .v.err { color: var(--bad); }
+  .fr .v.flash { animation: fl .9s; }
+  @keyframes fl { from { background: #ffe38a; } to { background: transparent; } }
+  body.dark .fr .v.flash { animation-name: fld; } @keyframes fld { from { background: #6b5316; } to { background: transparent; } }
+  .fr .go { border: 1px solid var(--line2); background: var(--card); border-radius: 6px; width: 26px; height: 24px; color: var(--accent); display: grid; place-items: center; }
+  .fr .go:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .fr .bar { position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 2px; }
+  .inline-edit { font: 500 13px var(--ui); border: 1px solid var(--accent); border-radius: 4px; padding: 2px 5px; outline: none; background: var(--card); color: var(--ink); }
+
+  .hex { font: 12.5px/22px var(--mono); padding: 8px 12px; user-select: none; }
+  .hx { display: flex; }
+  .hx .ha { width: 52px; color: var(--ink3); flex: none; }
+  .hx .hb { display: grid; grid-template-columns: repeat(16, 24px); flex: none; }
+  .hx .hb.gap span:nth-child(8) { margin-right: 8px; }
+  .hx .hb span { text-align: center; cursor: crosshair; position: relative; }
+  .hx .hb span.z { color: var(--ink3); }
+  .hx .hb span.fs { box-shadow: inset 1.5px 0 var(--line2); }
+  .hx .hb span.hl { outline: 1.5px solid var(--accent); outline-offset: -1px; z-index: 1; }
+  .hx .hb span.sl { background: var(--accent) !important; color: #fff; }
+  .hx .hb span.chg { animation: fl .9s; }
+  .hx .hc { margin-left: 16px; color: var(--ink2); letter-spacing: 1px; white-space: pre; }
+  .legend { display: flex; gap: 10px; flex-wrap: wrap; padding: 8px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink2); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .interp { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); }
+  .interp div { padding: 8px 12px; border-right: 1px solid var(--line); font: 12px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .interp div:nth-child(4n) { border-right: none; }
+  .interp div:nth-child(n+5) { border-top: 1px solid var(--line); }
+  .interp label { display: block; font: 10px var(--ui); text-transform: uppercase; letter-spacing: .06em; color: var(--ink3); }
+
+  .define { position: fixed; z-index: 60; background: var(--card); border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.18); padding: 8px; width: 290px; display: none; }
+  .define.show { display: block; }
+  .define .dh { font-size: 12px; color: var(--ink2); padding: 2px 4px 8px; }
+  .define .dh b { font-family: var(--mono); color: var(--ink); }
+  .define .opts { display: flex; flex-wrap: wrap; gap: 4px; }
+  .define .opts button { border: 1px solid var(--line2); background: var(--card); border-radius: 6px; padding: 4px 8px; font: 11px var(--mono); }
+  .define .opts button.fit { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .define .opts button:hover { background: var(--accent); color: #fff; }
+
+  .sheet { position: fixed; inset: 0; background: rgba(20,18,12,.3); display: none; place-items: center; z-index: 80; backdrop-filter: blur(2px); }
+  .sheet.show { display: grid; }
+  .sheet .box { background: var(--card); border-radius: 14px; width: 420px; max-height: 70vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.25); overflow: hidden; }
+  .sheet .box input { margin: 14px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line2); font: 14px var(--ui); outline: none; background: var(--bg); color: var(--ink); }
+  .sheet .pl { overflow: auto; padding: 0 8px 8px; }
+  .sheet .pi { display: flex; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  .sheet .pi:hover { background: var(--accent-soft); }
+  .sheet .pi .pid { margin-left: auto; font: 12px var(--mono); color: var(--ink3); }
+
+  .cm { background: var(--card); border: 1px solid var(--line2); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.16); padding: 5px; min-width: 200px; font: 13px var(--ui); color: var(--ink); }
+  .cm-item { display: flex; align-items: center; padding: 6px 24px 6px 26px; border-radius: 6px; position: relative; white-space: nowrap; cursor: default; }
+  .cm-item:hover { background: var(--accent-soft); }
+  .cm-hint { margin-left: auto; padding-left: 20px; color: var(--ink3); font: 11px var(--mono); }
+  .cm-arrow { position: absolute; right: 8px; color: var(--ink3); }
+  .cm-checked::before { content: '●'; position: absolute; left: 10px; color: var(--accent); font-size: 8px; }
+  .cm-danger .cm-label { color: var(--bad); }
+  .cm-disabled { opacity: .4; }
+  .cm-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+  .cm-header { padding: 4px 10px 6px; color: var(--ink3); font: 11px var(--mono); }
+  .cm-sub { display: none; position: absolute; left: calc(100% + 4px); top: -6px; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(10px); background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 999px; font-size: 12px; opacity: 0; transition: .2s; pointer-events: none; z-index: 1000; }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; } ::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo"><i></i>reclass</div>
+    <div class="chip" id="proc"></div>
+    <div class="nav">
+      <button class="nb" id="back" title="Back (Alt+←)">←</button>
+      <button class="nb" id="fwd" title="Forward (Alt+→)">→</button>
+      <div class="crumbs" id="crumbs"></div>
+      <div class="rootExpr"><span style="color:var(--ink3);font-size:11px">root</span><input id="expr" spellcheck="false"><span id="exprRes"></span></div>
+    </div>
+    <button class="hbtn on" id="live">● Live</button>
+    <button class="hbtn" id="theme" title="Toggle theme">◐</button>
+  </header>
+  <div class="body">
+    <aside class="rail">
+      <h4>Classes <button id="addCls" title="New class">＋ New</button></h4>
+      <div id="classes"></div>
+      <h4>Signatures</h4>
+      <div id="sigs"></div>
+      <h4>Enums</h4>
+      <div id="enums"></div>
+    </aside>
+    <section class="work">
+      <div>
+        <div class="title"><h1 id="h1"></h1><span class="meta" id="h1meta"></span><span class="sp"></span>
+          <button class="hbtn" id="ins8">＋ 8 bytes</button><button class="hbtn" id="ins64">＋ 64 bytes</button></div>
+        <div class="strip" id="strip"></div>
+      </div>
+      <div class="panes">
+        <div class="card">
+          <div class="hd">Fields <span class="sub" id="fcount"></span><span class="sp"></span><span class="sub">double-click name to rename · right-click for more</span></div>
+          <div class="scroll" id="fields"></div>
+        </div>
+        <div class="card">
+          <div class="hd">Memory <span class="sub" id="hexsub"></span><span class="sp"></span><span class="sub">drag across bytes to define a field</span></div>
+          <div class="scroll hex" id="hex"></div>
+          <div class="interp" id="interp"></div>
+          <div class="legend" id="legend"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="define" id="define"></div>
+<div class="sheet" id="sheet"><div class="box"><input id="pq" placeholder="Search processes…"><div class="pl" id="pl"></div></div></div>
+
+<script src="../shared/model.js"></script>
+<script src="../shared/ui.js"></script>
+<script>
+const M = Model, $ = s => document.querySelector(s), esc = UI.esc;
+const CAT_VAR = c => `var(--k-${c})`, TINT = c => `var(--t-${c})`;
+
+// navigation stack: entries are { classId|null, base, label, fieldName, elems? }
+let stack = [], fwdStack = [];
+let selOff = null, hoverOff = null, byteSel = null;
+function rootEntry() { return { classId: M.state.rootClassId, base: M.rootAddress(), fieldName: null, root: true }; }
+function cur() { const e = stack[stack.length - 1]; return e.root ? Object.assign(e, { base: M.rootAddress(), classId: M.state.rootClassId }) : e; }
+function fieldsOf(e) { return e.classId != null ? M.getClass(e.classId).fields : e.elems; }
+stack = [rootEntry()];
+
+function navigate(d) {
+  const c = d.child;
+  stack.push({ classId: c.classId, base: c.base, fieldName: d.name, elems: c.classId == null ? c.fields : null, arrayLabel: c.classId == null ? d.typeLabel : null });
+  fwdStack = []; selOff = null; byteSel = null; renderAll();
+}
+$('#back').onclick = () => { if (stack.length > 1) { fwdStack.push(stack.pop()); selOff = null; renderAll(); } };
+$('#fwd').onclick = () => { if (fwdStack.length) { stack.push(fwdStack.pop()); selOff = null; renderAll(); } };
+addEventListener('keydown', e => {
+  if (e.altKey && e.key === 'ArrowLeft') $('#back').click();
+  if (e.altKey && e.key === 'ArrowRight') $('#fwd').click();
+  if (e.key === 'Escape') { hideDefine(); $('#sheet').classList.remove('show'); }
+});
+
+function renderHeader() {
+  const p = M.process();
+  $('#proc').innerHTML = M.state.attached ? `<span class="dot"></span>${p.name}<span style="color:var(--ink3)">${p.pid}</span>` : 'Attach…';
+  $('#back').disabled = stack.length < 2; $('#fwd').disabled = !fwdStack.length;
+  $('#crumbs').innerHTML = stack.map((e, i) => {
+    const cname = e.classId != null ? M.getClass(e.classId)?.name : e.arrayLabel;
+    return (i ? '<span class="sep">›</span>' : '') + `<span class="crumb ${i === stack.length - 1 ? 'last' : ''}" data-i="${i}">${e.fieldName ? `<span class="f">${esc(e.fieldName)}</span>` : ''}<span class="c">${esc(cname)}</span><span class="a">${e.base != null ? M.hex(e.base) : '?'}</span></span>`;
+  }).join('');
+  const r = M.evalExpr(M.state.rootExpr);
+  $('#exprRes').className = r.ok ? 'ok' : 'bad';
+  $('#exprRes').textContent = r.ok ? '✓' : '✕';
+  $('#exprRes').title = r.ok ? '0x' + M.addrStr(r.value) : r.error;
+}
+$('#crumbs').onclick = e => { const c = e.target.closest('.crumb'); if (!c) return; const i = +c.dataset.i; while (stack.length > i + 1) fwdStack.push(stack.pop()); selOff = null; renderAll(); };
+$('#expr').value = M.state.rootExpr;
+$('#expr').oninput = e => { M.state.rootExpr = e.target.value; renderAll(); };
+
+function renderRail() {
+  $('#classes').innerHTML = M.classes.map(c => {
+    const segs = c.fields.map(f => `<i style="width:${M.fieldSize(f) / Math.max(1, M.classSize(c.id)) * 100}%;background:${CAT_VAR(M.TYPES[f.type].cat)}"></i>`).join('');
+    return `<div class="ci ${cur().classId === c.id ? 'on' : ''} ${M.classRefs(c.id) ? '' : 'unused'}" data-id="${c.id}"><span class="sw">${segs}</span>${esc(c.name)}${c.id === M.state.rootClassId ? '<span class="star" title="root">★</span>' : ''}<span class="s">${M.hex(M.classSize(c.id))}h</span></div>`;
+  }).join('');
+  $('#sigs').innerHTML = M.signatures.map(s => `<div class="sig ${s.error ? 'err' : ''}" data-n="${s.name}" title="${esc(s.pattern)}"><span class="d" style="background:${s.error ? 'var(--bad)' : 'var(--good)'}"></span><span>$${s.name} <span style="color:var(--ink3)">· ${s.module}</span></span><span class="v">${s.error || M.addrStr(s.value)}</span></div>`).join('');
+  $('#enums').innerHTML = M.enums.map(e => `<div class="sig" title="${e.variants.map(v => v.join('=')).join(', ')}"><span class="d" style="background:var(--k-enum)"></span><span>${e.name}</span><span class="v">${e.variants.length} variants${e.isFlags ? ' · flags' : ''}</span></div>`).join('');
+}
+$('#classes').onclick = e => {
+  const c = e.target.closest('.ci'); if (!c) return;
+  const id = +c.dataset.id;
+  if (id === M.state.rootClassId) { stack = [rootEntry()]; }
+  else {
+    // find where this class currently lives by walking from root; fall back to setting it as root
+    const hit = findInstance(id);
+    if (hit) stack = hit; else { M.state.rootClassId = id; stack = [rootEntry()]; }
+  }
+  fwdStack = []; selOff = null; renderAll();
+};
+$('#classes').oncontextmenu = e => {
+  const c = e.target.closest('.ci'); if (!c) return; e.preventDefault();
+  const id = +c.dataset.id, cls = M.getClass(id);
+  UI.contextMenu(e.clientX, e.clientY, [
+    { label: 'Make root', onClick: () => { M.state.rootClassId = id; stack = [rootEntry()]; renderAll(); } },
+    { label: 'Rename', onClick: () => { const n = prompt('Class name', cls.name); if (n) M.renameClass(id, n); } },
+    { sep: true }, { label: 'Delete', danger: true, disabled: M.classRefs(id) > 0, onClick: () => M.removeClass(id) },
+  ]);
+};
+$('#sigs').onclick = e => { const s = e.target.closest('[data-n]'); if (s) { UI.copy('$' + s.dataset.n); } };
+function findInstance(cid) {
+  const seen = new Set();
+  const walk = (entry, path, depth) => {
+    if (depth > 4) return null;
+    for (const f of fieldsOf(entry)) {
+      const d = M.describe(f, entry.base);
+      if (!d.expandable || seen.has(d.child.base + ':' + d.child.classId)) continue;
+      seen.add(d.child.base + ':' + d.child.classId);
+      const next = { classId: d.child.classId, base: d.child.base, fieldName: d.name, elems: d.child.classId == null ? d.child.fields : null, arrayLabel: d.typeLabel };
+      if (d.child.classId === cid) return path.concat(next);
+      const r = walk(next, path.concat(next), depth + 1);
+      if (r) return r;
+    }
+    return null;
+  };
+  const root = rootEntry();
+  return root.base != null ? walk(root, [root], 0) : null;
+}
+
+$('#addCls').onclick = () => { const c = M.addClass(); UI.toast('Created ' + c.name + ' — point a field at it to explore'); };
+$('#ins8').onclick = () => insert(8);
+$('#ins64').onclick = () => insert(64);
+function insert(n) {
+  const e = cur(); if (e.classId == null) return;
+  const f = fieldsOf(e).find(f => f.offset === selOff);
+  M.insertBytes(e.classId, f ? f.id : -1, n, true);
+}
+
+// ---------------------------------------------------------------- fields + hex
+let descs = [], lastSig = '';
+function renderMain(force) {
+  const e = cur();
+  const fields = fieldsOf(e) || [];
+  descs = e.base == null ? [] : fields.map(f => M.describe(f, e.base));
+  const size = descs.reduce((s, d) => Math.max(s, d.offset + d.size), 0);
+  $('#h1').textContent = e.classId != null ? M.getClass(e.classId).name : e.arrayLabel;
+  $('#h1meta').textContent = (e.base != null ? '@ ' + M.addrStr(e.base) : 'invalid address') + '  ·  0x' + M.hex(size) + ' bytes';
+  $('#fcount').textContent = descs.length;
+  const sig = descs.map(d => d.field.id + d.typeLabel + d.name + d.error).join('|') + e.base;
+  if (force || sig !== lastSig) {
+    lastSig = sig;
+    $('#strip').innerHTML = descs.map(d => `<i data-o="${d.offset}" title="+${M.hex(d.offset)} ${esc(d.name || d.type)} (${d.size}B)" style="flex:${d.size} 0 0;background:${d.cat === 'hex' ? TINT('hex') : CAT_VAR(d.cat)};opacity:${d.cat === 'hex' ? 1 : .75}"></i>`).join('');
+    $('#fields').innerHTML = descs.map(d => {
+      const nm = d.name ? `<span class="n" data-name>${esc(d.name)}</span>` : `<span class="n anon" data-name>unknown_${M.hex(d.offset, 2)}</span>`;
+      return `<div class="fr ${d.offset === selOff ? 'sel' : ''}" data-o="${d.offset}"><span class="bar" style="background:${CAT_VAR(d.cat)}"></span>
+        <span class="o">+${M.hex(d.offset, 3)}</span>${nm}<span class="t" style="color:${CAT_VAR(d.cat)};background:${TINT(d.cat)}">${esc(d.typeLabel)}</span>
+        <span class="v ${d.error ? 'err' : ''}" data-v>${valHtml(d)}</span>${d.expandable ? '<button class="go" data-go title="Open">→</button>' : '<span></span>'}</div>`;
+    }).join('') || '<div style="padding:20px;color:var(--ink3)">Nothing to show — check the root expression.</div>';
+    descs.forEach(d => UI.changed('v' + e.base + d.offset, d.value));
+  } else {
+    const els = $('#fields').children;
+    descs.forEach((d, i) => {
+      if (UI.changed('v' + e.base + d.offset, d.value)) { const v = els[i].querySelector('[data-v]'); v.innerHTML = valHtml(d); v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash'); }
+    });
+  }
+  renderHex(e, size, force);
+  renderInterp();
+}
+function valHtml(d) { return esc(d.value) + (d.hints.length ? `<small>${esc(d.hints[0])}</small>` : ''); }
+
+let prevBytes = null;
+function renderHex(e, size, force) {
+  const n = Math.ceil(Math.max(size, 16) / 16) * 16;
+  const bytes = e.base != null ? M.read(e.base, n) : null;
+  $('#hexsub').textContent = e.base != null ? M.addrStr(e.base) + ' – ' + M.addrStr(e.base + n - 1) : '';
+  if (!bytes) { $('#hex').innerHTML = ''; return; }
+  const catAt = new Array(n).fill(null), startAt = new Set();
+  descs.forEach(d => { for (let i = 0; i < d.size && d.offset + i < n; i++) catAt[d.offset + i] = d; startAt.add(d.offset); });
+  let html = '';
+  for (let r = 0; r < n; r += 16) {
+    let bh = '', ah = '';
+    for (let i = r; i < r + 16; i++) {
+      const b = bytes[i], d = catAt[i];
+      const cls = [b ? '' : 'z', startAt.has(i) ? 'fs' : '', prevBytes && prevBytes[i] !== b && !force ? 'chg' : ''].join(' ');
+      bh += `<span data-b="${i}" class="${cls}" style="${d ? `background:${TINT(d.cat)};color:${b ? CAT_VAR(d.cat === 'hex' ? 'hex' : d.cat) : ''}` : ''}${d && d.cat === 'hex' && b ? ';color:var(--ink)' : ''}">${M.hex(b, 2)}</span>`;
+      ah += b >= 32 && b < 127 ? esc(String.fromCharCode(b)) : '·';
+    }
+    html += `<div class="hx"><span class="ha" title="${M.addrStr(e.base + r)}">+${M.hex(r, 3)}</span><span class="hb gap">${bh}</span><span class="hc">${ah}</span></div>`;
+  }
+  $('#hex').innerHTML = html;
+  prevBytes = bytes;
+  applyHighlight();
+  $('#legend').innerHTML = [['hex', 'unknown'], ['int', 'integer'], ['float', 'float'], ['vec', 'vector'], ['ptr', 'pointer'], ['text', 'text'], ['enum', 'enum'], ['bool', 'bool']]
+    .map(([c, l]) => `<span><i style="background:${c === 'hex' ? TINT(c) : CAT_VAR(c)};${c === 'hex' ? 'border:1px solid var(--line2)' : ''}"></i>${l}</span>`).join('');
+}
+function fieldAt(off) { return descs.find(d => off >= d.offset && off < d.offset + d.size); }
+function applyHighlight() {
+  const target = hoverOff != null ? fieldAt(hoverOff) : selOff != null ? fieldAt(selOff) : null;
+  document.querySelectorAll('#hex [data-b]').forEach(s => {
+    const b = +s.dataset.b;
+    s.classList.toggle('hl', !!target && b >= target.offset && b < target.offset + target.size);
+    s.classList.toggle('sl', !!byteSel && b >= Math.min(byteSel.a, byteSel.b) && b <= Math.max(byteSel.a, byteSel.b));
+  });
+  document.querySelectorAll('#fields .fr').forEach(el => el.classList.toggle('hl', !!target && +el.dataset.o === target.offset));
+  document.querySelectorAll('#strip i').forEach(el => el.classList.toggle('hl', !!target && +el.dataset.o === target.offset));
+}
+function renderInterp() {
+  const e = cur();
+  const off = byteSel ? Math.min(byteSel.a, byteSel.b) : hoverOff != null ? hoverOff : selOff;
+  const b = off != null && e.base != null ? M.read(e.base + off, 8) : null;
+  if (!b) { $('#interp').innerHTML = ['u8', 'i32', 'f32', 'f64', 'u16', 'i64', 'ptr', 'ascii'].map(k => `<div><label>${k}</label>—</div>`).join(''); return; }
+  const v = new DataView(b.buffer), p = Number(v.getBigUint64(0, true));
+  const kv = [['u8 @+' + M.hex(off), v.getUint8(0)], ['i32', v.getInt32(0, true)], ['f32', M.fmtFloat(v.getFloat32(0, true))], ['f64', M.fmtFloat(v.getFloat64(0, true))],
+    ['u16', v.getUint16(0, true)], ['i64', v.getBigInt64(0, true)], ['ptr', M.readable(p) ? (M.symbolize(p) === 'heap' ? M.hex(p) : M.symbolize(p)) : '—'], ['ascii', M.ascii(b)]];
+  $('#interp').innerHTML = kv.map(([k, x]) => `<div><label>${k}</label>${esc(x)}</div>`).join('');
+}
+
+// field list interactions
+const fieldsEl = $('#fields');
+fieldsEl.addEventListener('mousemove', e => { const fr = e.target.closest('.fr'); const o = fr ? +fr.dataset.o : null; if (o !== hoverOff) { hoverOff = o; applyHighlight(); renderInterp(); } });
+fieldsEl.addEventListener('mouseleave', () => { hoverOff = null; applyHighlight(); renderInterp(); });
+fieldsEl.addEventListener('click', e => {
+  const fr = e.target.closest('.fr'); if (!fr) return;
+  const d = descs.find(x => x.offset === +fr.dataset.o);
+  if (e.target.closest('[data-go]')) return navigate(d);
+  selOff = d.offset; byteSel = null; document.querySelectorAll('.fr').forEach(x => x.classList.toggle('sel', x === fr)); applyHighlight(); renderInterp();
+});
+fieldsEl.addEventListener('dblclick', e => {
+  const fr = e.target.closest('.fr'); if (!fr) return;
+  const d = descs.find(x => x.offset === +fr.dataset.o), ent = cur();
+  if (e.target.closest('[data-name]') && ent.classId != null) UI.inlineEdit(e.target.closest('[data-name]'), d.field.name, v => M.renameField(ent.classId, d.field.id, v));
+  else if (d.expandable) navigate(d);
+});
+fieldsEl.addEventListener('contextmenu', e => {
+  const fr = e.target.closest('.fr'); if (!fr) return; e.preventDefault();
+  const d = descs.find(x => x.offset === +fr.dataset.o), ent = cur();
+  const items = UI.fieldMenuItems(ent.classId, d, { onRename: () => UI.inlineEdit(fr.querySelector('[data-name]'), d.field.name, v => M.renameField(ent.classId, d.field.id, v)) });
+  if (d.expandable) items.splice(1, 0, { label: 'Open', hint: '→', onClick: () => navigate(d) });
+  UI.contextMenu(e.clientX, e.clientY, items);
+});
+$('#strip').onclick = e => { const i = e.target.closest('i'); if (i) { selOff = +i.dataset.o; renderMain(true); document.querySelector(`.fr[data-o="${selOff}"]`)?.scrollIntoView({ block: 'nearest' }); } };
+
+// hex drag-select → define popup
+const hexEl = $('#hex');
+let dragging = false;
+hexEl.addEventListener('mousedown', e => { const s = e.target.closest('[data-b]'); if (!s || e.button) return; hideDefine(); dragging = true; byteSel = { a: +s.dataset.b, b: +s.dataset.b }; applyHighlight(); e.preventDefault(); });
+hexEl.addEventListener('mousemove', e => {
+  const s = e.target.closest('[data-b]');
+  if (dragging && s) { byteSel.b = +s.dataset.b; applyHighlight(); renderInterp(); }
+  else if (!dragging) { const o = s ? +s.dataset.b : null; if (o !== hoverOff) { hoverOff = o; applyHighlight(); renderInterp(); } }
+});
+hexEl.addEventListener('mouseleave', () => { if (!dragging) { hoverOff = null; applyHighlight(); } });
+addEventListener('mouseup', e => { if (!dragging) return; dragging = false; showDefine(e.clientX, e.clientY); });
+function showDefine(x, y) {
+  const ent = cur(); if (ent.classId == null) return;
+  const a = Math.min(byteSel.a, byteSel.b), len = Math.abs(byteSel.b - byteSel.a) + 1;
+  const types = ['Float', 'Int32', 'UInt32', 'Bool', 'UInt8', 'Int16', 'Hex32', 'Pointer', 'Int64', 'Double', 'TextPointer', 'Vector2', 'Vector3', 'Vector4', 'Text', 'Hex64'];
+  const el = $('#define');
+  el.innerHTML = `<div class="dh">Define <b>${len} byte${len > 1 ? 's' : ''}</b> at <b>+0x${M.hex(a)}</b> as…</div><div class="opts">` +
+    types.sort((p, q) => (M.TYPES[q].size === len) - (M.TYPES[p].size === len)).map(t => `<button class="${M.TYPES[t].size === len ? 'fit' : ''}" data-t="${t}">${M.SHORT[t]}</button>`).join('') + '</div>';
+  el.style.left = Math.min(x + 8, innerWidth - 300) + 'px'; el.style.top = Math.min(y + 8, innerHeight - 160) + 'px';
+  el.classList.add('show');
+  el.onclick = ev => { const b = ev.target.closest('[data-t]'); if (!b) return; M.defineAt(ent.classId, a, b.dataset.t); selOff = a; hideDefine(); UI.toast(`+0x${M.hex(a)} is now ${b.dataset.t}`); };
+}
+function hideDefine() { $('#define').classList.remove('show'); byteSel = null; applyHighlight(); }
+document.addEventListener('mousedown', e => { if (!e.target.closest('#define') && !e.target.closest('#hex')) hideDefine(); });
+
+// header buttons
+$('#live').onclick = () => { M.setLive(M.state.paused); $('#live').classList.toggle('on', !M.state.paused); $('#live').textContent = M.state.paused ? '❚❚ Paused' : '● Live'; };
+$('#theme').onclick = () => document.body.classList.toggle('dark');
+$('#proc').onclick = () => { $('#sheet').classList.add('show'); $('#pq').value = ''; drawProcs(); $('#pq').focus(); };
+$('#sheet').onclick = e => { if (e.target.id === 'sheet') $('#sheet').classList.remove('show'); };
+function drawProcs() { const q = $('#pq').value.toLowerCase(); $('#pl').innerHTML = M.processes.filter(p => p.name.toLowerCase().includes(q)).map(p => `<div class="pi" data-pid="${p.pid}">${p.pid === M.state.pid ? '● ' : ''}${p.name}<span class="pid">${p.pid}</span></div>`).join(''); }
+$('#pq').oninput = drawProcs;
+$('#pl').onclick = e => { const p = e.target.closest('[data-pid]'); if (p) { M.attach(+p.dataset.pid); $('#sheet').classList.remove('show'); renderHeader(); } };
+
+function renderAll() { renderHeader(); renderRail(); renderMain(true); }
+M.on(what => { if (what === 'tick') { renderMain(false); } else renderAll(); });
+stack = [rootEntry()];
+navigate(M.describe(M.getClass(1).fields[1], M.rootAddress()));
+selOff = 0x2C; renderMain(true);
+</script>
+</body>
+</html>

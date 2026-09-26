@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>reclass-rs · web prototypes</title>
+<style>
+  body { margin: 0; background: #0e0f13; color: #e6e8ee; font: 15px/1.55 Inter, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1240px; margin: 0 auto; padding: 48px 28px 80px; }
+  h1 { font-size: 30px; letter-spacing: -.02em; margin: 0 0 6px; }
+  .lead { color: #9aa1b2; margin: 0 0 36px; max-width: 760px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 26px; }
+  a.card { display: block; text-decoration: none; color: inherit; background: #16181f; border: 1px solid #262a35; border-radius: 16px; overflow: hidden; transition: transform .15s, border-color .15s; }
+  a.card:hover { transform: translateY(-3px); border-color: #5b6cff; }
+  a.card img { display: block; width: 100%; aspect-ratio: 1400 / 850; object-fit: cover; border-bottom: 1px solid #262a35; }
+  .meta { padding: 16px 20px 20px; }
+  .meta h2 { margin: 0 0 4px; font-size: 18px; display: flex; gap: 10px; align-items: baseline; }
+  .meta h2 span { font: 12px Consolas, monospace; color: #6e7588; }
+  .meta p { margin: 0 0 10px; color: #a8aebd; font-size: 14px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tags i { font-style: normal; font-size: 12px; padding: 2px 9px; border-radius: 999px; background: #22252f; color: #b9bfcc; }
+  code { font: 13px Consolas, monospace; background: #1d2029; padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>reclass-rs — web frontend prototypes</h1>
+  <p class="lead">Five design directions for a browser UI. Each one is clickable and runs on the same mock backend (<code>shared/model.js</code>): a fake attached <code>Hollowfield.exe</code> with live-changing memory, pointers, an encrypted pointer, enums, arrays, signatures and the <code>[$GWorld] + 0x10</code> expression language. Right-click fields in any of them to change types, insert bytes and so on.</p>
+  <div class="grid">
+    <a class="card" href="01-classic/index.html"><img src="screenshots/01-classic.png" alt="Classic"><div class="meta">
+      <h2>1 · Classic <span>01-classic</span></h2>
+      <p>Faithful ReClass.NET look. Menubar, a toolbar with one-click type buttons, a dense colour-coded monospace tree, a properties pane and draggable floating windows. The closest to today's egui app.</p>
+      <div class="tags"><i>dense</i><i>mouse-first</i><i>floating windows</i><i>familiar</i></div></div></a>
+    <a class="card" href="02-workbench/index.html"><img src="screenshots/02-workbench.png" alt="Workbench"><div class="meta">
+      <h2>2 · Workbench <span>02-workbench</span></h2>
+      <p>VS Code-style IDE. Activity bar, a class explorer, tabs so several instances are open at once, a column grid, an inspector with every interpretation, watch/problems/output panels and a <code>Ctrl+K</code> command palette.</p>
+      <div class="tags"><i>multi-tab</i><i>inspector</i><i>watch list</i><i>command palette</i></div></div></a>
+    <a class="card" href="03-atlas/index.html"><img src="screenshots/03-atlas.png" alt="Atlas"><div class="meta">
+      <h2>3 · Atlas <span>03-atlas</span></h2>
+      <p>Light "paper" design with a light/dark toggle. You drill down through pointers like browser navigation (breadcrumbs, back/forward). The field list sits next to a colour-mapped hex dump; drag across bytes to define a field.</p>
+      <div class="tags"><i>light theme</i><i>hex-first</i><i>drill-down nav</i><i>layout strip</i></div></div></a>
+    <a class="card" href="04-terminal/index.html"><img src="screenshots/04-terminal.png" alt="Terminal"><div class="meta">
+      <h2>4 · Terminal <span>04-terminal</span></h2>
+      <p>Keyboard-first TUI. Vim motions (<code>j k l h</code>, <code>dd</code>, <code>/</code>), a <code>:</code> command line (<code>:root</code>, <code>:type f32</code>, <code>:attach</code>), fuzzy type picker. Phosphor, amber and neutral themes with an optional CRT effect.</p>
+      <div class="tags"><i>keyboard-only</i><i>vim keys</i><i>commands</i><i>themes</i></div></div></a>
+    <a class="card" href="05-constellation/index.html"><img src="screenshots/05-constellation.png" alt="Constellation"><div class="meta">
+      <h2>5 · Constellation <span>05-constellation</span></h2>
+      <p>Node-graph canvas. Every instance is a card; clicking a pointer port spawns the target card, connected by a wire (dashed for decrypted pointers). With "Share cards" on, pointers to an instance that's already open link to its card instead of duplicating it. Pan, zoom, auto-layout, minimap, floating glass panels.</p>
+      <div class="tags"><i>canvas</i><i>pointer graph</i><i>spatial</i><i>modern</i></div></div></a>
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>reclass-rs · Terminal</title>
+<style>
+  :root { --mono: "Cascadia Mono", "JetBrains Mono", "Fira Code", Consolas, monospace; }
+  body.green { --bg: #050a06; --fg: #7dff9b; --dim: #3c8a50; --faint: #1d4228; --hi: #d6ffe0; --acc: #ffe066; --err: #ff6b6b; --sel-bg: #7dff9b; --sel-fg: #041006; --glow: 0 0 6px rgba(125,255,155,.45); --c1: #7dff9b; --c2: #9be8ff; --c3: #ffe066; --c4: #ff9ef0; --c5: #b3ffcb; }
+  body.amber { --bg: #0c0700; --fg: #ffb547; --dim: #9a6516; --faint: #4a3008; --hi: #ffe2b0; --acc: #fff1c9; --err: #ff5c3a; --sel-bg: #ffb547; --sel-fg: #140b00; --glow: 0 0 6px rgba(255,181,71,.45); --c1: #ffb547; --c2: #ffd28a; --c3: #fff1c9; --c4: #ff8a4c; --c5: #ffcf80; }
+  body.mono { --bg: #1e1e2e; --fg: #cdd6f4; --dim: #7f849c; --faint: #45475a; --hi: #ffffff; --acc: #f9e2af; --err: #f38ba8; --sel-bg: #45475a; --sel-fg: #ffffff; --glow: none; --c1: #a6e3a1; --c2: #89b4fa; --c3: #f9e2af; --c4: #cba6f7; --c5: #94e2d5; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/20px var(--mono); overflow: hidden; }
+  body { text-shadow: var(--glow); }
+  body.crt::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 99;
+    background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px, rgba(0,0,0,.22) 3px), radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,.55) 100%); }
+  body.crt .screen { animation: flicker 6s infinite; }
+  @keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: .985; } 51% { opacity: .96; } 52% { opacity: 1; } }
+  .screen { display: grid; grid-template-rows: 20px 1fr 20px 20px; height: 100vh; padding: 6px 8px; gap: 0; }
+  .top, .bar, .cmd { white-space: pre; overflow: hidden; }
+  .top { color: var(--dim); }
+  .top b { color: var(--hi); font-weight: normal; }
+  .top .ok { color: var(--c1); } .top .bad { color: var(--err); }
+  .panes { display: grid; grid-template-columns: 30ch 1fr 52ch; gap: 1ch; min-height: 0; padding: 8px 0 6px; }
+  .box { border: 1px solid var(--faint); position: relative; padding: 10px 1ch 4px; min-height: 0; overflow: visible; display: flex; flex-direction: column; }
+  .box.focus { border-color: var(--fg); }
+  .box > .t { position: absolute; top: -11px; left: 1ch; background: var(--bg); padding: 0 1ch; color: var(--dim); }
+  .box.focus > .t { color: var(--hi); }
+  .box > .t .k { color: var(--acc); }
+  .lines { overflow: hidden; flex: 1; min-height: 0; }
+  .ln { white-space: pre; cursor: default; }
+  .ln.cur { background: var(--sel-bg); color: var(--sel-fg); text-shadow: none; }
+  .ln.cur * { color: inherit !important; }
+  .box:not(.focus) .ln.cur { background: var(--faint); color: var(--hi); }
+  .d { color: var(--dim); } .f { color: var(--faint); } .h { color: var(--hi); } .a { color: var(--acc); } .e { color: var(--err); }
+  .k1 { color: var(--c1); } .k2 { color: var(--c2); } .k3 { color: var(--c3); } .k4 { color: var(--c4); } .k5 { color: var(--c5); }
+  .chg { background: var(--acc); color: var(--bg) !important; text-shadow: none; }
+  .left { display: grid; grid-template-rows: 1fr auto; gap: 14px; min-height: 0; }
+  .bar { color: var(--dim); }
+  .bar .key { background: var(--dim); color: var(--bg); padding: 0 .5ch; text-shadow: none; }
+  .bar .lbl { margin-right: 1.5ch; }
+  .cmd { color: var(--hi); }
+  .cmd .msg { color: var(--dim); } .cmd .err { color: var(--err); }
+  .cursor { display: inline-block; width: 1ch; background: var(--fg); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .overlay { position: fixed; inset: 0; display: none; place-items: center; z-index: 50; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+  .overlay.show { display: grid; }
+  .overlay .box { background: var(--bg); border-color: var(--fg); width: 64ch; max-height: 80vh; box-shadow: 0 0 0 1ch var(--bg); }
+  .overlay pre { margin: 0; white-space: pre-wrap; }
+  .picker .ln { padding-left: 1ch; }
+  .inline-edit { background: var(--bg); color: var(--hi); border: none; border-bottom: 1px solid var(--acc); font: inherit; outline: none; }
+  .toast { display: none; }
+</style>
+</head>
+<body class="green crt">
+<div class="screen">
+  <div class="top" id="top"></div>
+  <div class="panes">
+    <div class="left">
+      <div class="box" id="pClasses"><span class="t"><span class="k">1</span> classes</span><div class="lines" id="classes"></div></div>
+      <div class="box" id="pSigs"><span class="t"><span class="k">2</span> signatures</span><div class="lines" id="sigs"></div></div>
+    </div>
+    <div class="box focus" id="pTree"><span class="t" id="treeTitle"></span><div class="lines" id="tree"></div></div>
+    <div class="box" id="pInsp"><span class="t"><span class="k">3</span> inspect</span><div class="lines" id="insp"></div></div>
+  </div>
+  <div class="bar" id="bar"></div>
+  <div class="cmd" id="cmd"></div>
+</div>
+<div class="overlay" id="ov"><div class="box"><span class="t" id="ovT"></span><div class="lines" id="ovB"></div></div></div>
+
+<script src="../shared/model.js"></script>
+<script src="../shared/ui.js"></script>
+<script>
+const M = Model, $ = s => document.querySelector(s), esc = UI.esc;
+const S = {
+  pane: 'tree', cur: 1, clsCur: 0, top: 0,
+  expanded: new Set(['/' + M.getClass(1).fields[1].id]),
+  mode: 'normal', buf: '', msg: 'reclass-rs tui — press ? for help', msgErr: false,
+  pending: '', lastSearch: '', picker: null,
+};
+let rows = [];
+const CATC = { hex: 'd', int: 'k1', uint: 'k1', float: 'k3', vec: 'k3', ptr: 'k4', text: 'k2', enum: 'k2', bool: 'k5', class: 'k5', array: 'k5' };
+const pad = (s, n) => { s = String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s.padEnd(n); };
+
+function msg(m, err) { S.msg = m; S.msgErr = !!err; renderCmd(); }
+
+// ---------------------------------------------------------------- render
+function renderTop() {
+  const p = M.process(), r = M.evalExpr(M.state.rootExpr);
+  const time = new Date().toLocaleTimeString('en-GB');
+  $('#top').innerHTML = ` <b>reclass-rs</b> │ ${M.state.attached ? `<b>${p.name}</b> [${p.pid}]` : '<span class="bad">detached</span>'} │ root <b>${esc(M.getClass(M.state.rootClassId).name)}</b> @ ${esc(M.state.rootExpr)} ${r.ok ? `<span class="ok">= ${M.addrStr(r.value)}</span>` : `<span class="bad">✗ ${esc(r.error)}</span>`} │ ${M.state.paused ? '<span class="bad">■ PAUSED</span>' : '<span class="ok">● LIVE 4Hz</span>'} │ ${time}`;
+}
+function renderClasses() {
+  $('#classes').innerHTML = M.classes.map((c, i) => {
+    const root = c.id === M.state.rootClassId;
+    return `<div class="ln ${S.pane === 'classes' && i === S.clsCur ? 'cur' : ''}" data-i="${i}">${root ? '<span class="a">*</span>' : ' '} ${pad(c.name, 18)}<span class="d">${M.hex(M.classSize(c.id), 4)}</span>${M.classRefs(c.id) ? '' : '<span class="f"> ∅</span>'}</div>`;
+  }).join('');
+  $('#sigs').innerHTML = M.signatures.map(s => `<div class="ln">${s.error ? '<span class="e">✗</span>' : '<span class="k1">✓</span>'} $${pad(s.name, 15)}<span class="${s.error ? 'e' : 'd'}">${s.error ? 'not found' : M.hex(s.value).slice(-9)}</span></div>`).join('');
+  ['pClasses', 'pTree', 'pInsp'].forEach(id => $('#' + id).classList.toggle('focus', { pClasses: 'classes', pTree: 'tree', pInsp: 'insp' }[id] === S.pane));
+}
+function renderTree() {
+  const base = M.rootAddress();
+  const cls = M.getClass(M.state.rootClassId);
+  rows = UI.flatten(cls.id, base, S.expanded);
+  S.cur = Math.max(0, Math.min(S.cur, rows.length - 1));
+  $('#treeTitle').innerHTML = `<span class="k">0</span> ${esc(cls.name)} <span class="d">· ${rows.length} rows · 0x${M.hex(M.classSize(cls.id))} bytes</span>`;
+  const el = $('#tree');
+  const vis = Math.max(5, Math.floor(el.clientHeight / 20));
+  if (S.cur < S.top) S.top = S.cur;
+  if (S.cur >= S.top + vis) S.top = S.cur - vis + 1;
+  S.top = Math.max(0, Math.min(S.top, Math.max(0, rows.length - vis)));
+  const out = [];
+  for (let i = S.top; i < Math.min(rows.length, S.top + vis); i++) {
+    const r = rows[i], d = r.d;
+    const tree = '<span class="f">' + '│ '.repeat(r.depth) + '</span>';
+    const tg = d.expandable ? (r.open ? '▾' : '▸') : ' ';
+    const nm = d.name ? `<span class="h">${pad(d.name, 16)}</span>` : `<span class="f">${pad('·', 16)}</span>`;
+    const ch = UI.changed('t' + r.key, d.value);
+    const val = `<span class="${d.error ? 'e' : ''} ${ch ? 'chg' : ''}">${esc(d.value)}</span>`;
+    const hint = d.hints.length ? ` <span class="d">; ${esc(d.hints[0])}</span>` : '';
+    out.push(`<div class="ln ${S.pane === 'tree' && i === S.cur ? 'cur' : ''}" data-i="${i}">${tree}<span class="a">${tg}</span> <span class="d">+${M.hex(d.offset, 4)}</span> <span class="${CATC[d.cat]}">${pad(d.typeLabel, 14)}</span> ${nm} ${val}${hint}</div>`);
+  }
+  if (!rows.length) out.push('<div class="ln e">  root expression does not resolve — :root &lt;expr&gt;</div>');
+  el.innerHTML = out.join('');
+}
+function renderInsp() {
+  const r = rows[S.cur], el = $('#insp');
+  if (!r) { el.innerHTML = ''; return; }
+  const d = r.d, a0 = d.addr - (d.addr % 8) - 16;
+  const lines = [
+    `<span class="d">name  </span> <span class="h">${esc(d.name || '(hex)')}</span>`,
+    `<span class="d">type  </span> <span class="${CATC[d.cat]}">${esc(d.typeLabel)}</span> <span class="d">${d.size}B</span>`,
+    `<span class="d">addr  </span> ${M.addrStr(d.addr)}`,
+    `<span class="d">offset</span> +0x${M.hex(d.offset)}  <span class="d">in</span> ${r.classId != null ? esc(M.getClass(r.classId).name) : '[]'}`,
+    `<span class="d">value </span> <span class="a">${esc(d.value)}</span>`,
+    ...d.hints.map(h => `<span class="d">      ; ${esc(h)}</span>`),
+    '',
+    '<span class="d">── bytes ──────────────────────────────</span>',
+  ];
+  for (let a = a0; a < a0 + 64; a += 8) {
+    const b = M.read(a, 8);
+    if (!b) { lines.push(`<span class="d">${M.hex(a, 12)}</span> <span class="e">?? ?? ?? ?? ?? ?? ?? ??</span>`); continue; }
+    let hx = '';
+    b.forEach((x, i) => { const on = a + i >= d.addr && a + i < d.addr + d.size; hx += `<span class="${on ? 'a' : x ? '' : 'f'}">${M.hex(x, 2)}</span> `; });
+    lines.push(`<span class="d">${M.hex(a, 12)}</span> ${hx}<span class="d">${esc(M.ascii(b))}</span>`);
+  }
+  const b = M.read(d.addr, 8);
+  if (b) {
+    const v = new DataView(b.buffer);
+    lines.push('', '<span class="d">── as ─────────────────────────────────</span>',
+      `<span class="d">i32</span> ${pad(v.getInt32(0, true), 13)}<span class="d">u32</span> ${v.getUint32(0, true)}`,
+      `<span class="d">f32</span> ${pad(M.fmtFloat(v.getFloat32(0, true)), 13)}<span class="d">f64</span> ${M.fmtFloat(v.getFloat64(0, true))}`,
+      `<span class="d">i64</span> ${v.getBigInt64(0, true)}`);
+  }
+  el.innerHTML = lines.map(l => `<div class="ln">${l}</div>`).join('');
+}
+function renderBar() {
+  const keys = S.mode === 'picker' ? [['↑↓', 'select'], ['⏎', 'apply'], ['esc', 'cancel'], ['type', 'filter']]
+    : [['j/k', 'move'], ['l/h', 'open/close'], ['t', 'type'], ['r', 'rename'], ['i/I', 'insert 8/64'], ['dd', 'delete'], ['p', 'target'], ['y', 'yank'], ['/', 'find'], [':', 'command'], ['?', 'help']];
+  $('#bar').innerHTML = keys.map(([k, l]) => `<span class="key">${k}</span> <span class="lbl">${l}</span>`).join('');
+}
+function renderCmd() {
+  if (S.mode === 'cmd' || S.mode === 'search' || S.mode === 'rename') {
+    const p = { cmd: ':', search: '/', rename: 'rename> ' }[S.mode];
+    $('#cmd').innerHTML = esc(p + S.buf) + '<span class="cursor">&nbsp;</span>';
+  } else $('#cmd').innerHTML = `<span class="${S.msgErr ? 'err' : 'msg'}">${esc(S.msg)}</span>${S.pending ? ' <span class="msg">' + S.pending + '</span>' : ''}`;
+}
+function renderAll() { renderTop(); renderClasses(); renderTree(); renderInsp(); renderBar(); renderCmd(); }
+
+// ---------------------------------------------------------------- actions
+const curRow = () => rows[S.cur];
+function editable(r) { if (!r || r.classId == null) { msg('array elements are read-only — edit the array instead', true); return false; } return true; }
+function toggle(open) {
+  const r = curRow(); if (!r) return;
+  if (r.d.expandable && (open === undefined ? true : open !== r.open)) { r.open ? S.expanded.delete(r.key) : S.expanded.add(r.key); }
+  else if (open === false && r.depth > 0) { const pk = r.key.slice(0, r.key.lastIndexOf('/')); S.cur = rows.findIndex(x => x.key === pk); }
+  else if (open && r.open) S.cur++;
+  renderAll();
+}
+function openPicker(title, items, apply) {
+  S.mode = 'picker'; S.picker = { title, items, apply, q: '', i: 0 };
+  drawPicker();
+}
+function drawPicker() {
+  const p = S.picker, list = p.items.filter(x => x.label.toLowerCase().includes(p.q.toLowerCase()));
+  p.i = Math.max(0, Math.min(p.i, list.length - 1)); p.list = list;
+  $('#ov').classList.add('show');
+  $('#ovT').innerHTML = `${esc(p.title)} <span class="d">filter:</span> <span class="a">${esc(p.q)}</span><span class="cursor">&nbsp;</span>`;
+  $('#ovB').innerHTML = '<div class="picker">' + list.map((x, i) => `<div class="ln ${i === p.i ? 'cur' : ''}">${x.cur ? '<span class="a">●</span>' : ' '} ${pad(x.label, 26)}<span class="d">${esc(x.hint || '')}</span></div>`).join('') + '</div>';
+  $('#ovB').querySelector('.cur')?.scrollIntoView({ block: 'nearest' });
+  renderBar();
+}
+function closeOverlay() { $('#ov').classList.remove('show'); S.mode = 'normal'; S.picker = null; renderBar(); }
+function typePicker() {
+  const r = curRow(); if (!editable(r)) return;
+  const items = []; M.TYPE_GROUPS.forEach(([g, ts]) => ts.forEach(t => items.push({ label: t, hint: g.toLowerCase() + (M.TYPES[t].size ? ' · ' + M.TYPES[t].size + 'B' : ''), cur: t === r.d.type, v: t })));
+  openPicker('type for ' + (r.d.name || '+' + M.hex(r.d.offset)), items, x => { M.setFieldType(r.classId, r.d.field.id, x.v); msg(`+0x${M.hex(r.d.offset)} → ${x.v}`); });
+}
+function targetPicker() {
+  const r = curRow(); if (!editable(r)) return;
+  const f = r.d.field;
+  if (f.type === 'Enum') return openPicker('enum', M.enums.map(e => ({ label: e.name, cur: e.id === f.enumId, v: e.id })), x => M.patchField(r.classId, f.id, { enumId: x.v }));
+  if (!['Pointer', 'EncryptedPointer', 'ClassInstance'].includes(f.type)) return msg('p: only for pointers, class instances and enums', true);
+  openPicker('target class', M.classes.map(c => ({ label: c.name, hint: '0x' + M.hex(M.classSize(c.id)), cur: f.target && f.target.classId === c.id, v: c.id })), x => M.patchField(r.classId, f.id, { target: { classId: x.v } }));
+}
+function help() {
+  S.mode = 'picker'; S.picker = null;
+  $('#ov').classList.add('show');
+  $('#ovT').innerHTML = 'help <span class="d">— esc to close</span>';
+  $('#ovB').innerHTML = `<pre>
+<span class="a">navigation</span>
+  j k ↓ ↑     move            g G      top / bottom
+  l → ⏎       expand / enter  h ←      collapse / parent
+  tab 0-3     switch pane     /  n     find field, next match
+
+<span class="a">editing</span>
+  t           change type     r        rename field
+  p           pointer target / enum
+  i  I        insert 8 / 64 bytes below
+  dd          delete field    y        yank address
+
+<span class="a">commands</span>
+  :root &lt;expr&gt;      e.g.  :root [&lt;Hollowfield.exe&gt; + 0x5A1230]
+  :class &lt;name&gt;     make class root       :new [name]   add class
+  :type &lt;T&gt;         set type (e.g. f32)    :attach &lt;pid|name&gt;
+  :live on|off      :theme green|amber|mono    :crt   :w   :q</pre>`;
+}
+
+// ---------------------------------------------------------------- commands
+const ALIAS = { f32: 'Float', f64: 'Double', i8: 'Int8', i16: 'Int16', i32: 'Int32', i64: 'Int64', u8: 'UInt8', u16: 'UInt16', u32: 'UInt32', u64: 'UInt64', ptr: 'Pointer', eptr: 'EncryptedPointer', vec2: 'Vector2', vec3: 'Vector3', vec4: 'Vector4', str: 'TextPointer', bool: 'Bool' };
+function runCmd(line) {
+  const [c, ...rest] = line.trim().split(/\s+/), arg = rest.join(' ');
+  switch (c) {
+    case 'root': { if (!arg) return msg('root = ' + M.state.rootExpr); const r = M.evalExpr(arg); M.state.rootExpr = arg; return r.ok ? msg('root → ' + M.addrStr(r.value)) : msg(r.error, true); }
+    case 'class': { const k = M.classes.find(x => x.name.toLowerCase() === arg.toLowerCase()); if (!k) return msg('no class ' + arg, true); M.state.rootClassId = k.id; S.expanded.clear(); S.cur = 0; return msg('root class = ' + k.name); }
+    case 'new': { const k = M.addClass(arg || undefined); return msg('created ' + k.name); }
+    case 'type': { const r = curRow(); if (!editable(r)) return; const t = ALIAS[arg.toLowerCase()] || Object.keys(M.TYPES).find(x => x.toLowerCase() === arg.toLowerCase()); if (!t) return msg('unknown type ' + arg, true); M.setFieldType(r.classId, r.d.field.id, t); return msg('→ ' + t); }
+    case 'attach': { const p = M.processes.find(p => String(p.pid) === arg || p.name.toLowerCase().startsWith(arg.toLowerCase())); if (!p) return msg('no such process', true); M.attach(p.pid); return msg(`attached to ${p.name} [${p.pid}]`); }
+    case 'detach': M.attach(0); return msg('detached');
+    case 'live': M.setLive(arg !== 'off'); return msg('live ' + (M.state.paused ? 'off' : 'on'));
+    case 'theme': if (!['green', 'amber', 'mono'].includes(arg)) return msg('themes: green amber mono', true); document.body.classList.remove('green', 'amber', 'mono'); document.body.classList.add(arg); return msg('theme ' + arg);
+    case 'crt': document.body.classList.toggle('crt'); return msg('crt ' + (document.body.classList.contains('crt') ? 'on' : 'off'));
+    case 'w': return msg('"memory_structure.json" written — ' + M.classes.length + ' classes, ' + M.signatures.length + ' signatures');
+    case 'q': case 'q!': case 'wq': return msg("you can check out any time you like, but you can never leave", true);
+    case 'sigs': case 'sig': return msg(M.signatures.map(s => '$' + s.name + (s.error ? '✗' : '✓')).join('  '));
+    case 'help': return help();
+    default: return msg('not a command: ' + c, true);
+  }
+}
+function search(q, from) {
+  if (!q) return;
+  S.lastSearch = q;
+  for (let k = 1; k <= rows.length; k++) {
+    const i = (from + k) % rows.length;
+    if ((rows[i].d.name || '').toLowerCase().includes(q.toLowerCase())) { S.cur = i; return msg('/' + q); }
+  }
+  msg('pattern not found: ' + q, true);
+}
+
+// ---------------------------------------------------------------- keys
+addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  if (S.mode === 'picker') {
+    e.preventDefault();
+    if (k === 'Escape' || (!S.picker && (k === 'q' || k === '?'))) return closeOverlay();
+    if (!S.picker) return;
+    const p = S.picker;
+    if (k === 'ArrowDown' || (k === 'j' && e.shiftKey === false && !p.q)) p.i++;
+    else if (k === 'ArrowUp' || (k === 'k' && !p.q)) p.i--;
+    else if (k === 'Enter') { const x = p.list[p.i]; closeOverlay(); if (x) p.apply(x); return renderAll(); }
+    else if (k === 'Backspace') p.q = p.q.slice(0, -1);
+    else if (k.length === 1) { p.q += k; p.i = 0; }
+    return drawPicker();
+  }
+  if (S.mode === 'cmd' || S.mode === 'search' || S.mode === 'rename') {
+    e.preventDefault();
+    if (k === 'Escape') { S.mode = 'normal'; S.buf = ''; return renderCmd(); }
+    if (k === 'Enter') {
+      const m = S.mode, b = S.buf; S.mode = 'normal'; S.buf = '';
+      if (m === 'cmd') runCmd(b);
+      if (m === 'search') search(b, S.cur);
+      if (m === 'rename') { const r = curRow(); M.renameField(r.classId, r.d.field.id, b); msg('renamed → ' + b); }
+      return renderAll();
+    }
+    if (k === 'Backspace') S.buf = S.buf.slice(0, -1);
+    else if (k === 'Tab' && S.mode === 'cmd') { const cmds = ['root', 'class', 'new', 'type', 'attach', 'detach', 'live', 'theme', 'crt', 'sigs', 'help', 'w', 'q']; const m = cmds.find(c => c.startsWith(S.buf)); if (m) S.buf = m + ' '; }
+    else if (k.length === 1) S.buf += k;
+    return renderCmd();
+  }
+  // normal mode
+  if (k === ':') { S.mode = 'cmd'; S.buf = ''; e.preventDefault(); return renderCmd(); }
+  if (k === '/') { S.mode = 'search'; S.buf = ''; e.preventDefault(); return renderCmd(); }
+  if (k === '?') return help();
+  if (k === 'Tab') { e.preventDefault(); S.pane = S.pane === 'tree' ? 'classes' : 'tree'; return renderAll(); }
+  if (k === '0') { S.pane = 'tree'; return renderAll(); }
+  if (k === '1') { S.pane = 'classes'; return renderAll(); }
+  if (S.pane === 'classes') {
+    if (k === 'j' || k === 'ArrowDown') S.clsCur = Math.min(M.classes.length - 1, S.clsCur + 1);
+    if (k === 'k' || k === 'ArrowUp') S.clsCur = Math.max(0, S.clsCur - 1);
+    if (k === 'Enter' || k === 'l') { M.state.rootClassId = M.classes[S.clsCur].id; S.expanded.clear(); S.cur = 0; S.pane = 'tree'; msg('root class = ' + M.classes[S.clsCur].name); }
+    return renderAll();
+  }
+  const r = curRow();
+  const seq = S.pending + k; S.pending = '';
+  switch (seq) {
+    case 'j': case 'ArrowDown': S.cur = Math.min(rows.length - 1, S.cur + 1); break;
+    case 'k': case 'ArrowUp': S.cur = Math.max(0, S.cur - 1); break;
+    case 'J': case 'PageDown': S.cur = Math.min(rows.length - 1, S.cur + 10); break;
+    case 'K': case 'PageUp': S.cur = Math.max(0, S.cur - 10); break;
+    case 'g': S.pending = 'g'; break;
+    case 'gg': S.cur = 0; break;
+    case 'G': S.cur = rows.length - 1; break;
+    case 'l': case 'ArrowRight': case 'Enter': return toggle(true);
+    case 'h': case 'ArrowLeft': return toggle(false);
+    case 't': return typePicker();
+    case 'p': return targetPicker();
+    case 'r': if (editable(r)) { S.mode = 'rename'; S.buf = r.d.name || ''; } break;
+    case 'i': if (editable(r)) { M.insertBytes(r.classId, r.d.field.id, 8, true); msg('inserted 8 bytes'); } break;
+    case 'I': if (editable(r)) { M.insertBytes(r.classId, r.d.field.id, 64, true); msg('inserted 64 bytes'); } break;
+    case 'd': S.pending = 'd'; break;
+    case 'dd': if (editable(r)) { M.removeField(r.classId, r.d.field.id); msg('deleted +0x' + M.hex(r.d.offset)); } break;
+    case 'y': if (r) { UI.copy(M.addrStr(r.d.addr)); msg('yanked ' + M.addrStr(r.d.addr)); } break;
+    case 'n': search(S.lastSearch, S.cur); break;
+    case 'Escape': msg(''); break;
+    default: if (k.length === 1 || k === 'Enter') msg(`unbound: ${seq}`, true);
+  }
+  e.preventDefault();
+  renderAll();
+});
+$('#tree').addEventListener('click', e => { const ln = e.target.closest('[data-i]'); if (ln) { S.pane = 'tree'; if (S.cur === +ln.dataset.i) toggle(); else { S.cur = +ln.dataset.i; renderAll(); } } });
+$('#tree').addEventListener('wheel', e => { S.cur = Math.max(0, Math.min(rows.length - 1, S.cur + Math.sign(e.deltaY) * 3)); renderAll(); });
+$('#classes').addEventListener('click', e => { const ln = e.target.closest('[data-i]'); if (ln) { S.pane = 'classes'; S.clsCur = +ln.dataset.i; renderAll(); } });
+$('#ov').addEventListener('click', e => { if (e.target.id === 'ov') closeOverlay(); });
+
+M.on(what => { if (what !== 'tick') msg(S.msg, S.msgErr); renderTop(); renderTree(); renderInsp(); if (what !== 'tick') renderClasses(); });
+addEventListener('resize', renderAll);
+renderAll();
+</script>
+</body>
+</html>

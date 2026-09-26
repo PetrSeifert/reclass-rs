@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>reclass-rs · Classic</title>
+<style>
+  :root {
+    --bg: #1b1d23; --panel: #22252d; --panel2: #2a2e37; --line: #353a45; --text: #c9ced8; --dim: #7d8594;
+    --sel: #2b4a7a; --hover: #2a303b; --accent: #4f8ff7;
+    --c-off: #8b93a3; --c-addr: #7fbf6a; --c-type: #5aa7f0; --c-name: #e6c07b; --c-val: #f09a6a; --c-cmt: #6a9955;
+    --c-ptr: #c678dd; --c-err: #f05b5b; --c-class: #56d4c4;
+    --mono: "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+    --ui: "Segoe UI", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 12px var(--ui); overflow: hidden; user-select: none; }
+  .app { display: grid; grid-template-rows: 24px 34px 1fr 22px; height: 100vh; }
+
+  /* menubar */
+  .menubar { display: flex; background: var(--panel); border-bottom: 1px solid var(--line); padding: 0 4px; }
+  .menubar .m { padding: 4px 10px; cursor: default; border-radius: 3px; position: relative; }
+  .menubar .m:hover, .menubar .m.open { background: var(--panel2); }
+  .brand { margin-left: auto; color: var(--dim); padding: 4px 8px; font-family: var(--mono); }
+
+  /* toolbar */
+  .toolbar { display: flex; align-items: center; gap: 2px; padding: 3px 6px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .tb { height: 26px; min-width: 26px; padding: 0 7px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 3px; background: none; color: var(--text); font: 11px var(--mono); cursor: pointer; }
+  .tb:hover { background: var(--panel2); border-color: var(--line); }
+  .tb.on { background: #1f3452; border-color: #2e5286; }
+  .tb .ic { font-size: 14px; font-family: var(--ui); }
+  .tsep { width: 1px; height: 18px; background: var(--line); margin: 0 5px; }
+  .tb.t-hex { color: #9aa3b3; } .tb.t-int { color: #7fbf6a; } .tb.t-flt { color: #f09a6a; } .tb.t-vec { color: #e6c07b; } .tb.t-ptr { color: var(--c-ptr); } .tb.t-txt { color: #56d4c4; }
+
+  .main { display: grid; grid-template-columns: 230px 4px 1fr; min-height: 0; }
+  .splitter { background: var(--line); cursor: col-resize; }
+
+  /* left */
+  .left { display: grid; grid-template-rows: auto 1fr auto 200px; background: var(--panel); min-height: 0; }
+  .ptitle { display: flex; align-items: center; padding: 5px 8px; background: var(--panel2); color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-size: 10px; font-weight: 600; border-bottom: 1px solid var(--line); }
+  .ptitle .sp { flex: 1; }
+  .ptitle button { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 13px; padding: 0 3px; }
+  .ptitle button:hover { color: var(--text); }
+  .classes { overflow: auto; padding: 4px 0; }
+  .cls { display: flex; align-items: center; gap: 6px; padding: 3px 10px; cursor: pointer; font-family: var(--mono); }
+  .cls:hover { background: var(--hover); }
+  .cls.root { background: var(--sel); }
+  .cls .ic { color: var(--c-class); }
+  .cls .sz { margin-left: auto; color: var(--dim); font-size: 11px; }
+  .cls.unused .nm { color: var(--dim); font-style: italic; }
+  .props { overflow: auto; font-family: var(--mono); font-size: 11px; }
+  .props table { width: 100%; border-collapse: collapse; }
+  .props td { padding: 2px 8px; border-bottom: 1px solid #2b2f38; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+  .props td:first-child { color: var(--dim); width: 70px; }
+  .props .empty { padding: 10px; color: var(--dim); font-family: var(--ui); }
+
+  /* memory view */
+  .view { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+  .addrbar { display: flex; align-items: center; gap: 8px; padding: 5px 8px; background: var(--panel); border-bottom: 1px solid var(--line); font-family: var(--mono); }
+  .addrbar label { color: var(--dim); }
+  .addrbar input { background: var(--bg); border: 1px solid var(--line); color: var(--text); font: 12px var(--mono); padding: 3px 6px; border-radius: 2px; width: 320px; outline: none; }
+  .addrbar input:focus { border-color: var(--accent); }
+  .addrbar input.bad { border-color: var(--c-err); }
+  .addrbar .res { color: var(--c-addr); }
+  .addrbar .res.bad { color: var(--c-err); }
+  .addrbar select { background: var(--bg); color: var(--c-class); border: 1px solid var(--line); font: 12px var(--mono); padding: 2px; }
+  .mem { overflow: auto; font: 13px/19px var(--mono); padding: 4px 0 40px; outline: none; }
+  .hdr { padding: 2px 8px; color: var(--c-class); white-space: pre; }
+  .hdr b { color: #fff; font-weight: normal; }
+  .row { white-space: pre; padding: 0 8px; cursor: default; position: relative; }
+  .row:hover { background: var(--hover); }
+  .row.sel { background: var(--sel); }
+  .row .tg { display: inline-block; width: 14px; color: var(--dim); cursor: pointer; text-align: center; }
+  .row .tg:hover { color: #fff; }
+  .o { color: var(--c-off); } .a { color: var(--c-addr); } .t { color: var(--c-type); } .n { color: var(--c-name); }
+  .v { color: var(--c-val); } .c { color: var(--c-cmt); } .e { color: var(--c-err); }
+  .row.hex .t { color: #8e97a8; } .row.hex .v { color: #b3bac6; }
+  .row.ptr .t { color: var(--c-ptr); }
+  .row.hex .bytes { color: #5d6573; }
+  .v.flash { animation: flash 0.7s ease-out; }
+  @keyframes flash { from { background: #7a4a14; color: #fff; } to { background: transparent; } }
+  .inline-edit { background: #111; color: var(--c-name); border: 1px solid var(--accent); font: 13px var(--mono); padding: 0 3px; outline: none; height: 18px; }
+  .depth { color: #3c424e; }
+
+  .status { display: flex; gap: 16px; align-items: center; padding: 0 8px; background: #16181d; border-top: 1px solid var(--line); color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  .status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #56c46a; margin-right: 5px; }
+  .status .dot.off { background: #777; }
+  .status .r { margin-left: auto; }
+
+  /* floating windows */
+  .win { position: fixed; background: var(--panel); border: 1px solid #454b58; box-shadow: 0 8px 30px rgba(0,0,0,.5); display: flex; flex-direction: column; z-index: 50; min-width: 300px; }
+  .win .wt { display: flex; align-items: center; padding: 5px 8px; background: linear-gradient(#323744, #2a2e38); cursor: move; font-weight: 600; }
+  .win .wt .x { margin-left: auto; cursor: pointer; color: var(--dim); padding: 0 4px; }
+  .win .wt .x:hover { color: #fff; background: #c42b1c; }
+  .win .wb { padding: 8px; overflow: auto; }
+  .win table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  .win th { text-align: left; color: var(--dim); font-weight: normal; padding: 3px 6px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+  .win td { padding: 3px 6px; border-bottom: 1px solid #2b2f38; }
+  .win tr.pick:hover td { background: var(--hover); cursor: pointer; }
+  .win tr.cur td { background: var(--sel); }
+  .win input { background: var(--bg); color: var(--text); border: 1px solid var(--line); font: 12px var(--mono); padding: 3px 5px; width: 100%; }
+  .btn { background: var(--panel2); color: var(--text); border: 1px solid var(--line); padding: 4px 12px; border-radius: 2px; cursor: pointer; font: 12px var(--ui); }
+  .btn:hover { border-color: var(--accent); }
+  .ok { color: var(--c-addr); } .err { color: var(--c-err); }
+
+  /* menus (shared/ui.js) */
+  .cm { background: #262a33; border: 1px solid #454b58; box-shadow: 0 6px 18px rgba(0,0,0,.5); padding: 3px 0; min-width: 190px; font: 12px var(--ui); }
+  .cm-item { display: flex; align-items: center; padding: 4px 24px 4px 22px; position: relative; cursor: default; white-space: nowrap; }
+  .cm-item:hover { background: var(--sel); }
+  .cm-hint { margin-left: auto; padding-left: 20px; color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  .cm-arrow { position: absolute; right: 8px; color: var(--dim); }
+  .cm-checked::before { content: '✓'; position: absolute; left: 7px; color: var(--accent); }
+  .cm-danger .cm-label { color: #f08080; }
+  .cm-disabled { opacity: .4; }
+  .cm-sep { height: 1px; background: var(--line); margin: 3px 0; }
+  .cm-header { padding: 3px 10px 4px; color: var(--dim); font-family: var(--mono); font-size: 11px; border-bottom: 1px solid var(--line); margin-bottom: 3px; }
+  .cm-sub { display: none; position: absolute; left: 100%; top: -4px; }
+  .toast { position: fixed; bottom: 34px; right: 16px; background: #2b4a7a; color: #fff; padding: 6px 12px; border-radius: 3px; font-family: var(--mono); opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10000; }
+  .toast.show { opacity: 1; }
+  ::-webkit-scrollbar { width: 12px; height: 12px; } ::-webkit-scrollbar-thumb { background: #3a3f4b; border: 3px solid var(--bg); border-radius: 6px; } ::-webkit-scrollbar-corner { background: transparent; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="menubar" id="menubar">
+    <div class="m" data-m="file">File</div><div class="m" data-m="edit">Edit</div><div class="m" data-m="process">Process</div>
+    <div class="m" data-m="tools">Tools</div><div class="m" data-m="view">View</div><div class="m" data-m="help">Help</div>
+    <div class="brand">reclass-rs 0.2.0</div>
+  </div>
+  <div class="toolbar">
+    <button class="tb" id="tbAttach" title="Attach to process"><span class="ic">⛓</span>Attach</button>
+    <button class="tb" title="Open" onclick="UI.toast('Open… (file dialog)')"><span class="ic">📂</span></button>
+    <button class="tb" title="Save" onclick="UI.toast('Saved memory_structure.json')"><span class="ic">💾</span></button>
+    <div class="tsep"></div>
+    <button class="tb" id="tbClass" title="Add class"><span class="ic">＋</span>Class</button>
+    <button class="tb" data-ins="4" title="Insert 4 bytes">+4</button>
+    <button class="tb" data-ins="8" title="Insert 8 bytes">+8</button>
+    <button class="tb" data-ins="64" title="Insert 64 bytes">+64</button>
+    <button class="tb" data-ins="1024" title="Insert 1024 bytes">+1K</button>
+    <div class="tsep"></div>
+    <button class="tb t-hex" data-type="Hex64">H64</button><button class="tb t-hex" data-type="Hex32">H32</button>
+    <button class="tb t-hex" data-type="Hex16">H16</button><button class="tb t-hex" data-type="Hex8">H8</button>
+    <button class="tb t-int" data-type="Int32">I32</button><button class="tb t-int" data-type="UInt32">U32</button><button class="tb t-int" data-type="Int64">I64</button>
+    <button class="tb t-flt" data-type="Float">F32</button><button class="tb t-flt" data-type="Double">F64</button><button class="tb t-flt" data-type="Bool">B</button>
+    <button class="tb t-vec" data-type="Vector2">V2</button><button class="tb t-vec" data-type="Vector3">V3</button><button class="tb t-vec" data-type="Vector4">V4</button>
+    <button class="tb t-ptr" data-type="Pointer">PTR</button><button class="tb t-ptr" data-type="EncryptedPointer">EPTR</button>
+    <button class="tb t-txt" data-type="Text">TXT</button><button class="tb t-txt" data-type="TextPointer">PTXT</button>
+    <div class="tsep"></div>
+    <button class="tb" id="tbSig"><span class="ic">🔎</span>Signatures</button>
+    <button class="tb on" id="tbLive"><span class="ic">⟳</span>Live</button>
+  </div>
+  <div class="main">
+    <div class="left">
+      <div class="ptitle">Classes<span class="sp"></span><button id="addCls" title="Add class">＋</button><button id="delUnused" title="Delete unused">🗑</button></div>
+      <div class="classes" id="classes"></div>
+      <div class="ptitle">Properties</div>
+      <div class="props" id="props"></div>
+    </div>
+    <div class="splitter"></div>
+    <div class="view">
+      <div class="addrbar">
+        <label>Class</label><select id="rootClass"></select>
+        <label>@</label><input id="expr" spellcheck="false">
+        <span class="res" id="exprRes"></span>
+      </div>
+      <div class="mem" id="mem" tabindex="0"></div>
+    </div>
+  </div>
+  <div class="status">
+    <span id="stProc"></span><span id="stRoot"></span><span id="stSel"></span>
+    <span class="r" id="stLive"></span>
+  </div>
+</div>
+
+<script src="../shared/model.js"></script>
+<script src="../shared/ui.js"></script>
+<script>
+const M = Model, $ = s => document.querySelector(s);
+// open GameWorld.localPlayer by default
+const expanded = new Set(['/' + M.getClass(1).fields[1].id]);
+let rows = [], rowEls = new Map(), lastSig = '', selKey = null;
+
+function renderClasses() {
+  const el = $('#classes');
+  el.innerHTML = M.classes.map(c => {
+    const refs = M.classRefs(c.id);
+    return `<div class="cls ${c.id === M.state.rootClassId ? 'root' : ''} ${refs ? '' : 'unused'}" data-id="${c.id}" title="Double-click to set as root">
+      <span class="ic">▣</span><span class="nm">${UI.esc(c.name)}</span><span class="sz">0x${M.hex(M.classSize(c.id))}</span></div>`;
+  }).join('');
+  $('#rootClass').innerHTML = M.classes.map(c => `<option value="${c.id}" ${c.id === M.state.rootClassId ? 'selected' : ''}>${UI.esc(c.name)}</option>`).join('');
+}
+$('#classes').addEventListener('dblclick', e => { const c = e.target.closest('.cls'); if (c) setRoot(+c.dataset.id); });
+$('#classes').addEventListener('contextmenu', e => {
+  const c = e.target.closest('.cls'); if (!c) return; e.preventDefault();
+  const id = +c.dataset.id, cls = M.getClass(id);
+  UI.contextMenu(e.clientX, e.clientY, [
+    { header: cls.name + ' · ' + M.classRefs(id) + ' refs' },
+    { label: 'Set as root', onClick: () => setRoot(id) },
+    { label: 'Rename', onClick: () => UI.inlineEdit(c.querySelector('.nm'), cls.name, v => M.renameClass(id, v)) },
+    { label: 'Copy as Rust struct', onClick: () => UI.copy(rustStruct(cls)) },
+    { sep: true },
+    { label: 'Delete', danger: true, disabled: M.classRefs(id) > 0, onClick: () => M.removeClass(id) },
+  ]);
+});
+function setRoot(id) { M.state.rootClassId = id; expanded.clear(); renderClasses(); render(true); }
+$('#rootClass').onchange = e => setRoot(+e.target.value);
+$('#addCls').onclick = $('#tbClass').onclick = () => { M.addClass(); };
+$('#delUnused').onclick = () => { M.classes.filter(c => !M.classRefs(c.id)).forEach(c => M.removeClass(c.id)); UI.toast('Deleted unused classes'); };
+
+function rustStruct(c) {
+  return `#[repr(C)]\npub struct ${c.name} {\n` + c.fields.map(f => `    /* 0x${M.offStr(f.offset)} */ pub ${f.name || '_pad_' + M.hex(f.offset)}: ${M.SHORT[f.type]},`).join('\n') + '\n}';
+}
+
+// expression bar
+const exprEl = $('#expr');
+exprEl.value = M.state.rootExpr;
+exprEl.addEventListener('input', () => { M.state.rootExpr = exprEl.value; render(true); });
+exprEl.addEventListener('keydown', e => { if (e.key === 'Enter') exprEl.blur(); });
+
+function rowHtml(r) {
+  const d = r.d, f = d.field;
+  const indent = '<span class="depth">' + '│ '.repeat(r.depth) + '</span>';
+  const tg = d.expandable ? `<span class="tg">${r.open ? '▾' : '▸'}</span>` : '<span class="tg"> </span>';
+  const type = (d.cat === 'hex' ? d.type : d.typeLabel).padEnd(12);
+  const name = d.cat === 'hex' ? '' : `<span class="n">${UI.esc(f.name || '')}</span> = `;
+  const val = `<span class="v ${d.error ? 'e' : ''}" data-v>${UI.esc(d.value)}</span>`;
+  const hint = d.hints.length ? ` <span class="c" data-h>// ${UI.esc(d.hints.join('  '))}</span>` : ' <span class="c" data-h></span>';
+  const cls = 'row ' + (d.cat === 'hex' ? 'hex' : d.cat === 'ptr' ? 'ptr' : '') + (r.key === selKey ? ' sel' : '');
+  return `<div class="${cls}" data-k="${r.key}">${indent}${tg}<span class="o">${M.offStr(d.offset)}</span>  <span class="a">${M.addrStr(d.addr)}</span>  <span class="t">${UI.esc(type)}</span> ${name}${val}${hint}</div>`;
+}
+
+function render(force) {
+  const base = M.rootAddress();
+  const r = M.evalExpr(M.state.rootExpr);
+  exprEl.classList.toggle('bad', !r.ok);
+  $('#exprRes').className = 'res' + (r.ok ? '' : ' bad');
+  $('#exprRes').textContent = r.ok ? '= 0x' + M.addrStr(r.value) : r.error;
+  const cls = M.getClass(M.state.rootClassId);
+  rows = UI.flatten(cls.id, base, expanded);
+  const sig = UI.sig(rows);
+  if (force || sig !== lastSig) {
+    lastSig = sig;
+    const hdr = `<div class="hdr">▣ <b>${UI.esc(cls.name)}</b>  [size 0x${M.hex(M.classSize(cls.id))}]  @ ${base == null ? '<span class="e">invalid</span>' : '0x' + M.addrStr(base)}</div>`;
+    $('#mem').innerHTML = hdr + rows.map(rowHtml).join('');
+    rowEls.clear();
+    $('#mem').querySelectorAll('.row').forEach(el => rowEls.set(el.dataset.k, el));
+    rows.forEach(r => UI.changed(r.key, r.d.value));
+  } else {
+    for (const r of rows) {
+      const el = rowEls.get(r.key); if (!el) continue;
+      if (UI.changed(r.key, r.d.value)) {
+        const v = el.querySelector('[data-v]');
+        v.textContent = r.d.value; v.classList.remove('flash'); void v.offsetWidth; v.classList.add('flash');
+        el.querySelector('[data-h]').textContent = r.d.hints.length ? '// ' + r.d.hints.join('  ') : '';
+      }
+    }
+  }
+  renderProps(); renderStatus();
+}
+
+function selected() { return rows.find(r => r.key === selKey); }
+function select(key, scroll) {
+  selKey = key;
+  rowEls.forEach((el, k) => el.classList.toggle('sel', k === key));
+  if (scroll) rowEls.get(key)?.scrollIntoView({ block: 'nearest' });
+  renderProps(); renderStatus();
+}
+
+function renderProps() {
+  const r = selected();
+  if (!r) { $('#props').innerHTML = '<div class="empty">Select a field to see its properties.</div>'; return; }
+  const d = r.d, b = d.bytes ? Array.from(d.bytes.slice(0, 8), x => M.hex(x, 2)).join(' ') : '';
+  const kv = [['name', d.name || '—'], ['type', d.typeLabel], ['offset', '0x' + M.hex(d.offset)], ['address', M.addrStr(d.addr)], ['size', d.size + ' bytes'], ['value', d.value], ['bytes', b]].concat(d.hints.map((h, i) => ['hint ' + (i + 1), h]));
+  $('#props').innerHTML = '<table>' + kv.map(([k, v]) => `<tr><td>${k}</td><td title="${UI.esc(v)}">${UI.esc(v)}</td></tr>`).join('') + '</table>';
+}
+function renderStatus() {
+  const p = M.process();
+  $('#stProc').innerHTML = M.state.attached ? `<span class="dot"></span>${p.name} (PID ${p.pid})` : '<span class="dot off"></span>Not attached';
+  $('#stRoot').textContent = 'Root: ' + M.getClass(M.state.rootClassId).name + ' ' + M.state.rootExpr;
+  const r = selected();
+  $('#stSel').textContent = r ? `Sel: ${M.addrStr(r.d.addr)} (+0x${M.hex(r.d.offset)}, ${r.d.size}B)` : '';
+  $('#stLive').textContent = M.state.paused ? 'PAUSED' : 'Live · 4 Hz';
+}
+
+// memory view interactions
+const mem = $('#mem');
+mem.addEventListener('mousedown', e => {
+  const row = e.target.closest('.row'); if (!row) return;
+  const k = row.dataset.k;
+  if (e.target.classList.contains('tg')) { toggle(k); return; }
+  select(k);
+});
+mem.addEventListener('dblclick', e => {
+  const row = e.target.closest('.row'); if (!row) return;
+  const r = rows.find(x => x.key === row.dataset.k);
+  if (e.target.classList.contains('n')) rename(r, e.target);
+  else if (r.d.expandable) toggle(r.key);
+});
+mem.addEventListener('contextmenu', e => {
+  const row = e.target.closest('.row'); if (!row) return;
+  e.preventDefault(); select(row.dataset.k);
+  const r = selected();
+  UI.contextMenu(e.clientX, e.clientY, UI.fieldMenuItems(r.classId, r.d, { onRename: () => rename(r, rowEls.get(r.key).querySelector('.n')) }));
+});
+function toggle(k) { expanded.has(k) ? expanded.delete(k) : expanded.add(k); render(true); }
+function rename(r, el) {
+  if (!el || r.classId == null) return;
+  UI.inlineEdit(el, r.d.field.name, v => M.renameField(r.classId, r.d.field.id, v));
+}
+mem.addEventListener('keydown', e => {
+  const i = rows.findIndex(r => r.key === selKey), r = rows[i];
+  if (e.key === 'ArrowDown') { e.preventDefault(); select(rows[Math.min(rows.length - 1, i + 1)].key, true); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); select(rows[Math.max(0, i - 1)].key, true); }
+  if (!r) return;
+  if (e.key === 'Enter' || e.key === 'ArrowRight' && !r.open || e.key === 'ArrowLeft' && r.open) { if (r.d.expandable) toggle(r.key); }
+  if (e.key === 'F2') rename(r, rowEls.get(r.key).querySelector('.n'));
+  if (e.key === 'Delete' && r.classId != null) M.removeField(r.classId, r.d.field.id);
+});
+
+// toolbar
+document.querySelectorAll('[data-type]').forEach(b => b.onclick = () => {
+  const r = selected(); if (!r || r.classId == null) return UI.toast('Select a field first');
+  M.setFieldType(r.classId, r.d.field.id, b.dataset.type);
+});
+document.querySelectorAll('[data-ins]').forEach(b => b.onclick = () => {
+  const r = selected(); const cid = r ? r.classId : M.state.rootClassId;
+  M.insertBytes(cid, r ? r.d.field.id : -1, +b.dataset.ins, true);
+});
+$('#tbLive').onclick = () => { M.setLive(M.state.paused); $('#tbLive').classList.toggle('on', !M.state.paused); renderStatus(); };
+$('#tbSig').onclick = () => openSignatures();
+$('#tbAttach').onclick = () => openAttach();
+
+// menubar
+const menus = {
+  file: [{ label: 'New', hint: 'Ctrl+N', onClick: () => UI.toast('New project') }, { label: 'Open…', hint: 'Ctrl+O', onClick: () => UI.toast('Open… (file dialog)') }, { label: 'Save', hint: 'Ctrl+S', onClick: () => UI.toast('Saved memory_structure.json') }, { label: 'Save As…', onClick: () => UI.toast('Save As… (file dialog)') }, { sep: true }, { label: 'Export Rust structs', onClick: () => UI.copy(M.classes.map(rustStruct).join('\n\n')) }],
+  edit: [{ label: 'Add class', onClick: () => M.addClass() }, { label: 'Delete unused classes', onClick: () => $('#delUnused').click() }],
+  process: [{ label: 'Attach…', onClick: openAttach }, { label: 'Detach', onClick: () => { M.attach(0); renderStatus(); } }, { sep: true }, { label: 'Modules…', onClick: openModules }],
+  tools: [{ label: 'Signatures…', onClick: openSignatures }, { label: 'Enums…', onClick: openEnums }],
+  view: [{ label: 'Live updates', checked: !M.state.paused, onClick: () => $('#tbLive').click() }, { label: 'Expand all pointers', onClick: () => { rows.forEach(r => r.d.expandable && expanded.add(r.key)); render(true); } }, { label: 'Collapse all', onClick: () => { expanded.clear(); render(true); } }],
+  help: [{ label: 'Expression syntax', onClick: () => UI.toast('0x10 + <mod.dll> + [ptr] + $Sig') }, { label: 'About reclass-rs', onClick: () => UI.toast('reclass-rs 0.2.0 — MIT') }],
+};
+$('#menubar').addEventListener('mousedown', e => {
+  const m = e.target.closest('.m'); if (!m) return;
+  e.stopPropagation();
+  const r = m.getBoundingClientRect();
+  menus.view[0].checked = !M.state.paused;
+  UI.contextMenu(r.left, r.bottom, menus[m.dataset.m]);
+});
+
+// floating windows
+function openWin(id, title, w, html, init) {
+  let win = document.getElementById(id);
+  if (!win) {
+    win = document.createElement('div'); win.id = id; win.className = 'win';
+    win.style.left = (innerWidth / 2 - w / 2 + (Math.random() * 60 - 30)) + 'px'; win.style.top = '120px'; win.style.width = w + 'px';
+    document.body.appendChild(win);
+  }
+  win.innerHTML = `<div class="wt">${title}<span class="x">✕</span></div><div class="wb">${html}</div>`;
+  win.querySelector('.x').onclick = () => win.remove();
+  const t = win.querySelector('.wt');
+  t.onmousedown = e => {
+    const ox = e.clientX - win.offsetLeft, oy = e.clientY - win.offsetTop;
+    const mv = ev => { win.style.left = ev.clientX - ox + 'px'; win.style.top = ev.clientY - oy + 'px'; };
+    addEventListener('mousemove', mv); addEventListener('mouseup', () => removeEventListener('mousemove', mv), { once: true });
+  };
+  init && init(win);
+  return win;
+}
+function openAttach() {
+  openWin('attach', 'Attach to Process', 380, `<input id="pf" placeholder="Filter…"><div style="max-height:320px;overflow:auto;margin-top:6px"><table><thead><tr><th>PID</th><th>Name</th></tr></thead><tbody id="pl"></tbody></table></div>`, win => {
+    const draw = () => {
+      const q = win.querySelector('#pf').value.toLowerCase();
+      win.querySelector('#pl').innerHTML = M.processes.filter(p => p.name.toLowerCase().includes(q) || String(p.pid).includes(q))
+        .map(p => `<tr class="pick ${p.pid === M.state.pid ? 'cur' : ''}" data-pid="${p.pid}"><td>${p.pid}</td><td>${p.name}</td></tr>`).join('');
+    };
+    draw(); win.querySelector('#pf').oninput = draw; win.querySelector('#pf').focus();
+    win.querySelector('#pl').ondblclick = e => { const tr = e.target.closest('tr'); if (tr) { M.attach(+tr.dataset.pid); UI.toast('Attached to PID ' + tr.dataset.pid); win.remove(); renderStatus(); } };
+  });
+}
+function openModules() {
+  openWin('mods', 'Modules — ' + M.process().name, 560, `<table><thead><tr><th>Name</th><th>Base</th><th>Size</th></tr></thead><tbody>` +
+    M.MODULES.map(m => `<tr class="pick" data-n="${m.name}"><td>${m.name}</td><td class="ok">${M.addrStr(m.base)}</td><td>0x${M.hex(m.size)}</td></tr>`).join('') + '</tbody></table>', win => {
+    win.querySelector('tbody').ondblclick = e => { const tr = e.target.closest('tr'); if (tr) UI.copy('<' + tr.dataset.n + '>'); };
+  });
+}
+function openSignatures() {
+  openWin('sigs', 'Signatures', 760, `<table><thead><tr><th>Name</th><th>Module</th><th>Pattern</th><th>Off</th><th>Len</th><th>Result</th></tr></thead><tbody>` +
+    M.signatures.map(s => `<tr><td class="n">$${s.name}</td><td>${s.module}</td><td style="color:#9aa3b3">${s.pattern}</td><td>${s.offset}</td><td>${s.instLen}</td><td class="${s.error ? 'err' : 'ok'}">${s.error || '0x' + M.addrStr(s.value)}</td></tr>`).join('') +
+    `</tbody></table><div style="margin-top:8px;display:flex;gap:6px"><button class="btn" onclick="UI.toast('Signature added')">Add</button><button class="btn" onclick="UI.toast('Re-scanned 4 signatures')">Rescan</button></div>`);
+}
+function openEnums() {
+  openWin('enums', 'Enums', 420, M.enums.map(e => `<div style="margin-bottom:10px"><div class="n" style="font-family:var(--mono)">enum ${e.name} : u${e.size * 8}${e.isFlags ? ' [flags]' : ''}</div><table>` +
+    e.variants.map(([k, v]) => `<tr><td>${k}</td><td class="ok">${e.isFlags ? '0x' + M.hex(v) : v}</td></tr>`).join('') + '</table></div>').join(''));
+}
+
+M.on(what => {
+  if (what === 'tick') return render(false);
+  renderClasses(); render(true);
+});
+renderClasses(); render(true);
+select(rows[1].key);
+mem.focus();
+</script>
+</body>
+</html>
