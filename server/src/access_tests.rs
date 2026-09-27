@@ -47,8 +47,8 @@ async fn request(path: &str, headers: &str) -> String {
 }
 
 #[tokio::test]
-async fn both_endpoints_require_token_even_with_trusted_or_missing_origin() {
-    for path in ["/ws", "/api/rpc"] {
+async fn all_endpoints_require_token_even_with_trusted_or_missing_origin() {
+    for path in ["/ws", "/api/rpc", "/api/auth"] {
         for headers in [
             "",
             "Origin: http://localhost:5173\r\n",
@@ -66,7 +66,7 @@ async fn both_endpoints_require_token_even_with_trusted_or_missing_origin() {
 
 #[tokio::test]
 async fn valid_token_does_not_bypass_origin_validation() {
-    for path in ["/ws", "/api/rpc"] {
+    for path in ["/ws", "/api/rpc", "/api/auth"] {
         for origin in [
             "https://untrusted.example",
             "null",
@@ -85,6 +85,17 @@ async fn valid_token_does_not_bypass_origin_validation() {
             assert!(request(path, &headers).await.starts_with("HTTP/1.1 400"));
         }
     }
+}
+
+#[tokio::test]
+async fn auth_probe_accepts_valid_token_without_workspace_access() {
+    let headers = format!(
+        "Authorization: Bearer {}\r\nOrigin: http://localhost:5173\r\n",
+        "a".repeat(64)
+    );
+    assert!(request("/api/auth", &headers)
+        .await
+        .starts_with("HTTP/1.1 204"));
 }
 
 #[tokio::test]

@@ -148,6 +148,10 @@ fn api_router(state: AppState, access: access::Access) -> Router {
     Router::new()
         .route("/ws", get(ws_upgrade))
         .route("/api/rpc", post(rpc))
+        .route(
+            "/api/auth",
+            post(|| async { axum::http::StatusCode::NO_CONTENT }),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::new(access),
             access::authorize,

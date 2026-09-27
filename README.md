@@ -42,6 +42,7 @@ entering it again. Treat the token as access to the entire shared workspace.
 - `--demo` runs against a built-in simulated process (no driver needed)
 - `--pid <pid>` attaches on start; `--bind` changes the address, loopback by default.
   Use a TLS reverse proxy for remote access to protect the token and process memory.
+  Disable or redact proxy logging of `Sec-WebSocket-Protocol`, which carries the browser's API token.
 - `--decrypt-module <name>` sets the module holding XenuineDecrypt for encrypted pointers
   (defaults to the process image)
 - The project file is the same `memory_structure.json` the egui app uses; the canvas is
@@ -63,6 +64,8 @@ curl -s localhost:7878/api/rpc -H "Authorization: Bearer $RECLASS_API_TOKEN" -d 
 
 These shell examples assume `RECLASS_API_TOKEN` contains the configured or printed
 token. Both `/api/rpc` and `/ws` require authentication before workspace access.
+`POST /api/auth` uses the same authentication and origin checks and returns 204
+without accessing the workspace; the UI uses it to distinguish rejection from an outage.
 Native WebSocket clients can send the same Bearer header. Browser clients offer
 the protocols `reclass` and `reclass-token.<token>`; the server selects only
 `reclass`. Credentials in query strings and cookies are not accepted.

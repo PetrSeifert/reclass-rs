@@ -24,11 +24,15 @@ let socket: WebSocket | null = null
 // Kept only in this tab's memory. Never put credentials in a URL or storage.
 let apiToken = ''
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+let reconnectDelay = 1000
 let nextId = 1
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
 
 export function connect(token?: string) {
-  if (token !== undefined) apiToken = token.trim()
+  if (token !== undefined) {
+    apiToken = token.trim()
+    reconnectDelay = 1000
+  }
   if (!/^[0-9a-fA-F]{64,}$/.test(apiToken)) {
     app.connectionError = 'Enter the API token from the server terminal.'
     return
@@ -45,20 +49,40 @@ export function connect(token?: string) {
   ws.onopen = () => {
     if (socket !== ws) return
     opened = true
+    reconnectDelay = 1000
     app.connected = true
     app.connecting = false
   }
-  ws.onclose = () => {
+  ws.onclose = async () => {
     if (socket !== ws) return
     app.connected = false
-    app.connecting = false
+    app.connecting = true
     for (const p of pending.values()) p.reject(new Error('disconnected'))
     pending.clear()
-    if (opened) reconnectTimer = setTimeout(() => connect(), 1000)
-    else {
-      apiToken = ''
-      app.connectionError = 'Connection rejected or unavailable. Check the token, server, and allowed origin, then retry.'
+    if (!opened) {
+      // WebSocket hides handshake status codes. Confirm rejection over HTTP;
+      // network errors, timeouts and proxy failures must preserve the token.
+      let rejected = false
+      try {
+        const response = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiToken}` },
+          cache: 'no-store',
+          redirect: 'error',
+          signal: AbortSignal.timeout(5000),
+        })
+        rejected = response.status === 401 || response.status === 403
+      } catch { /* Keep retrying while the server is unreachable. */ }
+      if (socket !== ws) return
+      if (rejected) {
+        apiToken = ''
+        app.connecting = false
+        app.connectionError = 'Connection rejected. Check the token and allowed origin, then retry.'
+        return
+      }
     }
+    reconnectTimer = setTimeout(() => connect(), reconnectDelay)
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000)
   }
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data)
