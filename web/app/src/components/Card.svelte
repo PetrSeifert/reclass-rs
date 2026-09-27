@@ -75,7 +75,6 @@
 >
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="nh" onmousedown={startDrag} oncontextmenu={(e) => openMenu(e, cardMenu(card, rename))}>
-    <span class="gl">{card.className[0] ?? '?'}</span>
     {#if renamingClass}
       <input
         class="inline-edit"
@@ -146,7 +145,6 @@
     background: linear-gradient(180deg, color-mix(in srgb, var(--hue) 16%, transparent), transparent);
     white-space: nowrap;
   }
-  .gl { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; background: color-mix(in srgb, var(--hue) 25%, transparent); color: var(--hue); font-size: 12px; font-weight: 700; flex: none; }
   .nm { font-weight: 650; font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
   .via { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
   .root { font-size: 9px; letter-spacing: 0.08em; background: var(--accent); color: #fff; padding: 1px 5px; border-radius: 4px; }
