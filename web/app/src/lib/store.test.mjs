@@ -16,7 +16,9 @@ function setup() {
     AbortSignal,
     fetch: (url, options) => new Promise((resolve, reject) => requests.push({ url, options, resolve, reject })),
     WebSocket: class {
-      constructor(url, protocols) { this.protocols = protocols; sockets.push(this) }
+      static OPEN = 1
+      constructor(url, protocols) { this.protocols = protocols; this.readyState = 1; this.sent = []; sockets.push(this) }
+      send(data) { this.sent.push(JSON.parse(data)) }
       close() {}
     },
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId },
@@ -125,4 +127,23 @@ test('an old auth response cannot clear a replacement token or schedule a retry'
   assert.equal(client.timers.size, 0)
   client.connect()
   assert.equal(client.sockets.at(-1).protocols[1], `reclass-token.${'b'.repeat(64)}`)
+})
+
+test('quiet calls reject without a toast, others show the error', async () => {
+  const client = setup()
+  client.connect(token)
+  const socket = client.sockets.at(-1)
+  socket.onopen()
+  const fail = (error) => {
+    const { id } = socket.sent.at(-1)
+    socket.onmessage({ data: JSON.stringify({ type: 'reply', id, ok: false, error }) })
+  }
+  const quiet = client.call('scanResults', {}, { quiet: true })
+  fail('no scan yet')
+  await assert.rejects(quiet, /no scan yet/)
+  assert.equal(client.app.toast, null)
+  const loud = client.call('scanResults')
+  fail('no scan yet')
+  await assert.rejects(loud, /no scan yet/)
+  assert.equal(client.app.toast.text, 'no scan yet')
 })

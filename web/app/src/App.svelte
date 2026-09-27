@@ -12,6 +12,7 @@
   import Dialogs from './components/Dialogs.svelte'
   import EnumEditor from './components/EnumEditor.svelte'
   import Modules from './components/Modules.svelte'
+  import Scanner from './components/Scanner.svelte'
 
   let dialog = $state<'attach' | 'signature' | null>(null)
   let editingSignature = $state<SignatureDef | null>(null)
@@ -45,6 +46,7 @@
     const sel = selectedRow()
     if (e.key === 'f') fit()
     else if (e.key === 'm') app.modulesOpen = !app.modulesOpen
+    else if (e.key === 's') app.scannerOpen = !app.scannerOpen
     else if (e.key === 't') tidy()
     else if (e.key === 'F2' && sel && sel.row.classId != null && !sel.row.ty.startsWith('Hex')) {
       e.preventDefault()
@@ -68,6 +70,7 @@
 <Inspector />
 <Minimap />
 <Modules />
+<Scanner />
 <div class="glass hint">
   Click a <b style:color="var(--k-ptr)">●</b> port to follow a pointer · drag to pan · wheel to zoom · right-click for more
 </div>

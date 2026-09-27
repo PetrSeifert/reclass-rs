@@ -83,6 +83,7 @@
     ⧉ {s?.share ? 'Share cards' : 'Separate cards'}
   </button>
   <button class="tbtn" class:active={app.modulesOpen} title="Loaded modules (M)" onclick={() => (app.modulesOpen = !app.modulesOpen)}>▣ Modules</button>
+  <button class="tbtn" class:active={app.scannerOpen} title="Find addresses by value (S)" onclick={() => (app.scannerOpen = !app.scannerOpen)}>⌕ Scan</button>
   <button class="tbtn" title="Save project (Ctrl+S)" onclick={save}>
     {s?.dirty ? '● ' : ''}Save
   </button>

@@ -110,6 +110,21 @@ export interface CardView {
 
 export interface Frame { type: 'frame'; seq: number; rootAddress: string | null; rootError: string | null; cards: CardView[] }
 
+/** Reply of `scan` (first scan) and `scanNext`. */
+export interface ScanReply { count: number; ms: number; regions?: number; bytes?: number }
+
+export interface ScanHit {
+  address: string
+  /** Current value, or null if the address is no longer readable. */
+  value: string | null
+  /** Value at the last scan. */
+  previous: string
+  /** `module+0x…` when the address is inside a module. */
+  symbol: string | null
+}
+
+export interface ScanResults { count: number; type: string; results: ScanHit[] }
+
 export const TYPE_GROUPS: [string, FieldType[]][] = [
   ['Hex', ['Hex64', 'Hex32', 'Hex16', 'Hex8']],
   ['Signed', ['Int64', 'Int32', 'Int16', 'Int8']],

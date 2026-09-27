@@ -18,6 +18,7 @@ export const app = $state({
   /** Enum open in the enum editor. */
   editingEnum: null as number | null,
   modulesOpen: false,
+  scannerOpen: false,
 })
 
 let socket: WebSocket | null = null
@@ -119,10 +120,13 @@ export function connect(token?: string) {
   }
 }
 
-/** Sends a command. Errors are shown as a toast and re-thrown. */
-export async function call<T = unknown>(method: string, params: object = {}): Promise<T> {
+/**
+ * Sends a command. Errors are shown as a toast and re-thrown; `quiet` only
+ * re-throws them, for background polls whose failure is expected.
+ */
+export async function call<T = unknown>(method: string, params: object = {}, { quiet = false } = {}): Promise<T> {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
-    toast('Not connected to reclass-server', true)
+    if (!quiet) toast('Not connected to reclass-server', true)
     throw new Error('not connected')
   }
   const id = nextId++
@@ -131,7 +135,7 @@ export async function call<T = unknown>(method: string, params: object = {}): Pr
   try {
     return await p
   } catch (e) {
-    toast((e as Error).message, true)
+    if (!quiet) toast((e as Error).message, true)
     throw e
   }
 }

@@ -84,6 +84,8 @@ The driver cannot list memory regions, so scans find readable memory by probing:
 a 32-bit process is covered whole, a 64-bit one through its modules and the heap
 memory their pointers lead to. `--module` or `--range` narrows a scan, and
 read-only parts of module images are skipped unless `--read-only` is given.
+The web UI's *Scan* panel (`S`) runs the same scans and shows the one in progress,
+whichever client started it.
 
 `reclass --help` documents address expressions, field references
 (`Player.health`, `Player+0x1C`) and the type syntax (`Player*`, `f32[4]`,
@@ -122,7 +124,8 @@ Commands (see `server/src/workspace.rs`): `processes`, `attach`, `detach`, `modu
 `renameField`, `insertBytes`, `removeField`, `setPointerTarget`, `setEmbeddedClass`,
 `setEnum`, `setArray`, `addClass`, `renameClass`, `deleteClass`, `deleteUnusedClasses`,
 `setSignature`, `removeSignature`, `rescan`, `follow`, `closeCard`, `closeAll`,
-`mergeCard`, `toggleExpand`, `moveCards`, `setShare`, `save`, `load`, `newProject`.
+`mergeCard`, `toggleExpand`, `moveCards`, `setShare`, `save`, `load`, `newProject`,
+`scan`, `scanNext`, `scanResults`, `scanClear`.
 The WebSocket at `/ws` takes the same `{id, method, params}` messages and streams
 `session`, `defs` and `frame` updates.
 
