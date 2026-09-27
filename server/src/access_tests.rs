@@ -195,6 +195,62 @@ fn origin_configuration_rejects_patterns_and_urls_with_paths() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pipelined_websocket_commands_execute_in_arrival_order() {
+    use tokio_tungstenite::tungstenite::{
+        client::IntoClientRequest,
+        Message,
+    };
+
+    let (addr, server) = start().await;
+    let mut req = format!("ws://{addr}/ws").into_client_request().unwrap();
+    req.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {}", "a".repeat(64)).parse().unwrap(),
+    );
+    let (mut socket, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut defs = Value::Null;
+        for _ in 0..3 {
+            let message = socket.next().await.unwrap().unwrap();
+            let value: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+            if value["type"] == "defs" {
+                defs = value;
+            }
+        }
+        let class = &defs["classes"][0];
+        let class_id = class["id"].as_u64().unwrap();
+        let field_id = class["fields"][0]["id"].as_u64().unwrap();
+        // Queue dependent edits without waiting for replies. Resetting the field
+        // between pairs also catches commands overtaking a previous pair.
+        let mut id = 0;
+        for _ in 0..100 {
+            for (method, params) in [
+                ("retype", json!({ "classId": class_id, "fieldId": field_id, "ty": "Hex64" })),
+                ("retype", json!({ "classId": class_id, "fieldId": field_id, "ty": "Pointer" })),
+                ("setPointerTarget", json!({ "classId": class_id, "fieldId": field_id, "target": { "FieldType": "Int32" } })),
+            ] {
+                socket.feed(Message::Text(json!({ "id": id, "method": method, "params": params }).to_string().into())).await.unwrap();
+                id += 1;
+            }
+        }
+        socket.flush().await.unwrap();
+        for expected in 0..id {
+            loop {
+                let message = socket.next().await.unwrap().unwrap();
+                let value: Value = serde_json::from_str(message.to_text().unwrap()).unwrap();
+                if value["type"] == "reply" {
+                    assert_eq!(value["ok"], true, "command failed: {value}");
+                    assert_eq!(value["id"], expected, "reply arrived out of order");
+                    break;
+                }
+            }
+        }
+    }).await;
+    server.abort();
+    result.unwrap();
+}
+
 #[tokio::test]
 async fn rejects_untrusted_websocket_origin() {
     let response = request("/ws", "Origin: https://untrusted.example\r\n").await;

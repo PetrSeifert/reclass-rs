@@ -208,14 +208,12 @@ async fn client(socket: WebSocket, state: AppState) {
             .unwrap_or_default()
             .to_string();
         let params = req.get("params").cloned().unwrap_or(Value::Null);
-        let state = state.clone();
-        let reply_tx = reply_tx.clone();
-        tokio::spawn(async move {
-            let mut reply = state.exec(method, params).await;
-            reply["type"] = json!("reply");
-            reply["id"] = id;
-            let _ = reply_tx.send(reply.to_string());
-        });
+        // Finish each command before receiving the next so dependent edits
+        // execute in arrival order. The writer continues sending independently.
+        let mut reply = state.exec(method, params).await;
+        reply["type"] = json!("reply");
+        reply["id"] = id;
+        let _ = reply_tx.send(reply.to_string());
     }
     writer.abort();
 }
