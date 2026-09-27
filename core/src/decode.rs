@@ -451,7 +451,87 @@ pub fn element_field(t: &PointerTarget, index: u32) -> FieldDefinition {
 
 #[cfg(test)]
 mod tests {
-    use super::fmt_float;
+    use super::*;
+    use crate::{
+        demo::DemoSource,
+        memory::{
+            ClassDefinition,
+            MemoryStructure,
+        },
+    };
+
+    #[test]
+    fn vector2_decodes_both_components_and_preserves_following_offset() {
+        let base = 0x1F3_0000_1000;
+        let source = DemoSource::new();
+        source.poke(
+            base,
+            &[
+                1.0f32.to_le_bytes(),
+                (-2.5f32).to_le_bytes(),
+                42u32.to_le_bytes(),
+            ]
+            .concat(),
+        );
+        let mut class = ClassDefinition::new("Vector2Fields".into());
+        class.add_named_field("position".into(), FieldType::Vector2);
+        class.add_named_field("following".into(), FieldType::UInt32);
+        let ms = MemoryStructure::new("root".into(), base, class);
+        let layout = Layout::of(&ms);
+        let decoder = Decoder::new(&source, layout);
+        let def = ms.class_registry.get(ms.root_class.class_id).unwrap();
+        let offsets = layout.field_offsets(def.id);
+        let decoded = decoder.decode(&def.fields[0], base + offsets[0].0);
+        assert_eq!(decoded.value, "(1.0, -2.5)");
+        assert_eq!(decoded.error, None);
+        assert_eq!(decoded.bytes.len(), 8);
+        assert_eq!(offsets, vec![(0, 8), (8, 4)]);
+        assert_eq!(def.fields[1].offset, 8);
+        assert_eq!(ms.root_class.fields[1].address, base + 8);
+        assert_eq!(
+            decoder.decode(&def.fields[1], base + offsets[1].0).value,
+            "42"
+        );
+    }
+
+    #[test]
+    fn vector2_array_uses_eight_byte_stride() {
+        let base = 0x1F3_0000_1000;
+        let source = DemoSource::new();
+        source.poke(
+            base,
+            &[
+                1.0f32.to_le_bytes(),
+                2.0f32.to_le_bytes(),
+                3.0f32.to_le_bytes(),
+                4.0f32.to_le_bytes(),
+            ]
+            .concat(),
+        );
+        let element = PointerTarget::FieldType(FieldType::Vector2);
+        let mut class = ClassDefinition::new("Vector2Array".into());
+        class.add_named_field("positions".into(), FieldType::Array);
+        class.fields[0].array_element = Some(element.clone());
+        class.fields[0].array_length = Some(2);
+        class.add_named_field("following".into(), FieldType::UInt32);
+        let ms = MemoryStructure::new("root".into(), base, class);
+        let layout = Layout::of(&ms);
+        let decoder = Decoder::new(&source, layout);
+        let stride = layout.target_size(&element);
+        assert_eq!(stride, 8);
+        assert_eq!(
+            layout.field_offsets(ms.root_class.class_id),
+            vec![(0, 16), (16, 4)]
+        );
+        for (index, expected) in ["(1.0, 2.0)", "(3.0, 4.0)"].iter().enumerate() {
+            let decoded = decoder.decode(
+                &element_field(&element, index as u32),
+                base + index as u64 * stride,
+            );
+            assert_eq!(&decoded.value, expected);
+            assert_eq!(decoded.error, None);
+        }
+    }
 
     #[test]
     fn floats_are_short_and_stable() {

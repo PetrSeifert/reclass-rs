@@ -63,13 +63,10 @@ impl FieldType {
     pub fn get_size(&self) -> u64 {
         match self {
             FieldType::Hex64 | FieldType::Int64 | FieldType::UInt64 | FieldType::Double => 8,
-            FieldType::Hex32
-            | FieldType::Int32
-            | FieldType::UInt32
-            | FieldType::Float
-            | FieldType::Vector2 => 4,
+            FieldType::Hex32 | FieldType::Int32 | FieldType::UInt32 | FieldType::Float => 4,
             FieldType::Hex16 | FieldType::Int16 | FieldType::UInt16 => 2,
             FieldType::Hex8 | FieldType::Int8 | FieldType::UInt8 | FieldType::Bool => 1,
+            FieldType::Vector2 => 8,
             FieldType::Vector3 => 12,
             FieldType::Vector4 => 16,
             FieldType::Text => 32,

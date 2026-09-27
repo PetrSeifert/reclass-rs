@@ -37,7 +37,7 @@ mod field_type_tests {
         assert_eq!(FieldType::Float.get_size(), 4);
         assert_eq!(FieldType::Double.get_size(), 8);
 
-        assert_eq!(FieldType::Vector2.get_size(), 4);
+        assert_eq!(FieldType::Vector2.get_size(), 8);
         assert_eq!(FieldType::Vector3.get_size(), 12);
         assert_eq!(FieldType::Vector4.get_size(), 16);
 
