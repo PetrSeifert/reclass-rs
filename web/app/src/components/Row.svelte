@@ -53,6 +53,18 @@
     }
   }
 
+  /** What an untyped hex value probably is, colored like the type it suggests. */
+  const guesses = $derived(
+    row.cat !== 'hex'
+      ? []
+      : row.hints.map((h) =>
+          h.startsWith('-> ') ? { text: `→ ${h.slice(3)}`, cat: 'ptr' }
+          : h.startsWith('f32 ') ? { text: h, cat: 'float' }
+          : h.startsWith("'") ? { text: h, cat: 'text' }
+          : { text: h, cat: 'int' },
+        ),
+  )
+
   const portTitle: Record<string, string> = {
     closed: 'Follow pointer',
     open: 'Linked — click to unlink',
@@ -94,10 +106,14 @@
           if (e.key === 'Escape') renaming.key = ''
         }}
       />
-    {:else}
+    {:else if row.cat !== 'hex'}
+      <!-- Hex fields have no name; their type label says the rest. -->
       <span class="n" class:anon={!row.name}>{row.name ?? SHORT[row.ty]}</span>
     {/if}
     <span class="t" style:color="var(--k-{row.cat})">{row.typeLabel}</span>
+    {#if guesses.length}
+      <span class="g" title={guesses.map((g) => g.text).join(' · ')}>{#each guesses as g, i (i)}<span style:color="var(--k-{g.cat})">{g.text}</span>{/each}</span>
+    {/if}
   </span>
   <span class="v" class:err={!!row.error} bind:this={valueEl} title={[row.error, ...row.hints].filter(Boolean).join(' · ')}>{row.value}</span>
   {#if row.port}
@@ -131,6 +147,8 @@
   .n { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
   .n.anon { color: var(--faint); }
   .t { font: 10px var(--mono); flex: none; }
+  .g { margin-left: auto; display: flex; gap: 8px; min-width: 0; overflow: hidden; font: 10.5px var(--mono); opacity: 0.75; }
+  .g > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tg { color: var(--dim); width: 10px; flex: none; cursor: pointer; }
   .tg:hover { color: var(--text); }
   .v { font: 11.5px var(--mono); color: #cfd5e2; text-align: right; max-width: 175px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 3px; padding: 0 2px; }
