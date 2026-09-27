@@ -1,4 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 
 use serde::{
     Deserialize,
@@ -106,6 +109,52 @@ pub struct MemoryStructure {
 }
 
 impl MemoryStructure {
+    /// Validate the entire registry before expanding untrusted definitions into instances.
+    /// Pointer targets do not create nested instances and may contain cycles.
+    pub fn validate_embedded_definitions(&self) -> anyhow::Result<()> {
+        const MAX_EMBEDDED_DEPTH: usize = 64;
+        let registry = &self.class_registry;
+        let mut heights = HashMap::<u64, usize>::new();
+        let mut active = HashSet::new();
+        for root in registry.get_class_ids() {
+            // Use an explicit stack so validation itself cannot overflow the call stack.
+            let mut stack = vec![(root, false)];
+            while let Some((id, exiting)) = stack.pop() {
+                if heights.contains_key(&id) {
+                    continue;
+                }
+                let Some(def) = registry.get(id) else {
+                    continue;
+                };
+                let children = || {
+                    def.fields
+                        .iter()
+                        .filter(|field| field.field_type == FieldType::ClassInstance)
+                        .filter_map(|field| field.class_id)
+                        .filter(|child| registry.contains(*child))
+                };
+                if exiting {
+                    let height = 1 + children().map(|child| heights[&child]).max().unwrap_or(0);
+                    anyhow::ensure!(
+                        height <= MAX_EMBEDDED_DEPTH,
+                        "embedded class depth exceeds {MAX_EMBEDDED_DEPTH} at class {id}"
+                    );
+                    active.remove(&id);
+                    heights.insert(id, height);
+                } else {
+                    anyhow::ensure!(active.insert(id), "embedding cycle at class {id}");
+                    anyhow::ensure!(
+                        active.len() <= MAX_EMBEDDED_DEPTH,
+                        "embedded class depth exceeds {MAX_EMBEDDED_DEPTH} at class {id}"
+                    );
+                    stack.push((id, true));
+                    stack.extend(children().map(|child| (child, false)));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn new(root_name: String, root_address: u64, root_class_def: ClassDefinition) -> Self {
         let root_class = ClassInstance::new(root_name, root_address, root_class_def.clone());
 
