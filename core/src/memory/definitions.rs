@@ -103,6 +103,8 @@ pub struct ClassDefinition {
     pub id: u64,
     pub name: String,
     pub fields: Vec<FieldDefinition>,
+    /// Cached sum of fixed-size fields only; excludes arrays and embedded classes.
+    /// Use `crate::layout::Layout::class_size` for byte sizes and array strides.
     pub total_size: u64,
     #[serde(default)]
     pub entry_offset: Option<u64>,

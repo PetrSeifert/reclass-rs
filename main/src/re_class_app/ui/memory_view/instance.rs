@@ -7,6 +7,7 @@ use eframe::egui::{
     Ui,
 };
 use handle::AppHandle;
+use reclass_core::layout::Layout;
 
 use super::{
     context_menu::FieldCtx,
@@ -528,7 +529,8 @@ impl ReClassGui {
                                             if let Some(class_def) =
                                                 ms.class_registry.get_by_id(*cid).cloned()
                                             {
-                                                let elem_size = class_def.total_size.max(1);
+                                                let elem_size =
+                                                    Layout::of(ms).class_size(*cid).max(1);
                                                 for i in 0..len {
                                                     let elem_addr = ptr + (i as u64) * elem_size;
                                                     let mut nested = ClassInstance::new(
@@ -1288,7 +1290,7 @@ impl ReClassGui {
                             if let Some(ms) = unsafe { (mem_ptr).as_mut() } {
                                 if let Some(class_def) = ms.class_registry.get_by_id(*cid).cloned()
                                 {
-                                    let elem_size = class_def.total_size.max(1);
+                                    let elem_size = Layout::of(ms).class_size(*cid).max(1);
                                     for i in 0..len {
                                         let elem_addr = field.address + (i as u64) * elem_size;
                                         let mut nested = ClassInstance::new(
