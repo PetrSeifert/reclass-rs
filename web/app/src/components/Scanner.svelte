@@ -1,10 +1,10 @@
 <script lang="ts">
   import { app, call, copy } from '../lib/store.svelte'
-  import { openMenu } from '../lib/menu.svelte'
+  import { addWatch, openMenu } from '../lib/menu.svelte'
   import type { ScanReply, ScanResults, ScanHit } from '../lib/types'
 
   const TYPES = ['i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64', 'f32', 'f64', 'text', 'bytes']
-  const FIRST: [string, string][] = [['exact', 'Exact value'], ['between', 'Value between'], ['unknown', 'Unknown initial value']]
+  const FIRST: [string, string][] = [['exact', 'Exact value'], ['between', 'Value between'], ['unknown', 'Unknown initial value'], ['related', 'Changes with a watch']]
   const NEXT: [string, string][] = [
     ['exact', 'Exact value'], ['between', 'Value between'], ['changed', 'Changed'], ['unchanged', 'Unchanged'],
     ['increased', 'Increased'], ['decreased', 'Decreased'], ['increasedBy', 'Increased by'], ['decreasedBy', 'Decreased by'],
@@ -30,11 +30,17 @@
   let end = $state('')
   let readOnly = $state(false)
   let modules = $state<string[]>([])
+  /** Watch a related scan follows. */
+  let watch = $state<number | null>(null)
 
   const scanning = $derived(results != null)
+  const related = $derived(results?.related)
+  const following = $derived(!!related?.running)
   const type = $derived(results?.type ?? ty)
   const pattern = $derived(type === 'text' || type === 'bytes')
-  const conds = $derived((scanning ? NEXT : FIRST).filter(([c]) => !pattern || PATTERN_CONDS.includes(c)))
+  const conds = $derived(
+    (scanning ? NEXT : FIRST).filter(([c]) => (!pattern || PATTERN_CONDS.includes(c)) && (c !== 'related' || (app.watches.length > 0 && !pattern))),
+  )
   const inputs = $derived(cond === 'between' ? 2 : ['exact', 'increasedBy', 'decreasedBy'].includes(cond) ? 1 : 0)
   const placeholder = $derived(type === 'bytes' ? '48 8B ?? 05' : type === 'text' ? 'text to find' : type.startsWith('f') ? '100.5' : '100 or 0x64')
 
@@ -46,6 +52,28 @@
   const summary = $derived(
     busy ? 'Scanning…' : last && results?.count === last.count && results.type === last.type ? last.text : '',
   )
+
+  // "Find related values" on a watch opens the scanner ready to follow it,
+  // once the scan in progress, if any, is replaced.
+  let wantRelated = $state(false)
+  /** Whether `results` reflects the server yet: right after opening, it may not. */
+  let loaded = $state(false)
+  $effect(() => {
+    const id = app.relatedWatch
+    if (id == null) return
+    app.relatedWatch = null
+    watch = id
+    wantRelated = true
+  })
+  $effect(() => {
+    if (wantRelated && loaded && !scanning) {
+      wantRelated = false
+      cond = 'related'
+    }
+  })
+  $effect(() => {
+    if (watch == null || !app.watches.some((w) => w.id === watch)) watch = app.watches[0]?.id ?? null
+  })
 
   // A condition the current mode or type does not offer falls back to an exact value.
   $effect(() => {
@@ -62,6 +90,7 @@
       // No scan yet is the normal empty state, not a problem.
       problem = message.startsWith('no scan') || message === 'not connected' ? '' : message
     }
+    loaded = true
   }
 
   // Poll while open, so live values and scans from other clients appear.
@@ -69,7 +98,10 @@
     if (!app.scannerOpen || !app.connected || !app.session?.attached) return
     refresh()
     const timer = setInterval(() => !busy && refresh(), 1000)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      loaded = false
+    }
   })
 
   $effect(() => {
@@ -104,10 +136,23 @@
   }
 
   function newScan() {
-    const params: Record<string, unknown> = { type: ty, readOnly, ...(cond === 'unknown' ? { unknown: true } : values()) }
+    const params: Record<string, unknown> =
+      cond === 'related'
+        ? { type: ty, readOnly, watch }
+        : { type: ty, readOnly, ...(cond === 'unknown' ? { unknown: true } : values()) }
     if (scope === 'range') Object.assign(params, { start: start.trim(), end: end.trim() })
     else if (scope) params.module = scope
-    run('scan', params)
+    run(cond === 'related' ? 'scanRelated' : 'scan', params)
+  }
+
+  async function stopFollowing() {
+    busy = true
+    try {
+      await call('scanRelatedStop')
+    } finally {
+      busy = false
+      await refresh()
+    }
   }
 
   function nextScan() {
@@ -136,6 +181,7 @@
       { label: 'Copy address', hint: address, onClick: () => copy(address) },
       ...(reference ? [{ label: 'Copy module reference', hint: reference, onClick: () => copy(reference) }] : []),
       { label: 'Copy value', hint: h.value ?? '', disabled: h.value == null, onClick: () => copy(h.value ?? '') },
+      ...(pattern ? [] : [{ label: 'Watch value', hint: results?.type, onClick: () => addWatch(address, results!.type, h.symbol ?? undefined) }]),
       { sep: true },
       { label: 'Use as root expression', hint: address, onClick: () => call('setRoot', { expr: address }) },
     ])
@@ -159,17 +205,39 @@
     {#if !app.session?.attached}
       <div class="none">Attach to a process to scan its memory.</div>
     {:else}
+      {#if wantRelated && scanning}
+        <div class="ask">
+          Finding values related to <b>{app.watches.find((w) => w.id === watch)?.label ?? 'the watch'}</b> needs a new scan,
+          which replaces the current {results?.count.toLocaleString()} results.
+          <div class="line buttons">
+            <button type="button" class="primary" disabled={busy} onclick={clear}>Replace current scan</button>
+            <button type="button" disabled={busy} onclick={() => (wantRelated = false)}>Keep it</button>
+          </div>
+        </div>
+      {/if}
       <form onsubmit={submit}>
         <div class="line">
           <select bind:value={ty} disabled={scanning || busy} title={scanning ? 'Start a new scan to change the type' : 'Value type'}>
             {#each TYPES as t (t)}<option value={t}>{t}</option>{/each}
             {#if scanning && !TYPES.includes(type)}<option value={type}>{type}</option>{/if}
           </select>
-          <select bind:value={cond} disabled={busy}>
-            {#each conds as [c, label] (c)}<option value={c}>{label}</option>{/each}
-          </select>
+          {#if !following}
+            <select bind:value={cond} disabled={busy}>
+              {#each conds as [c, label] (c)}<option value={c}>{label}</option>{/each}
+            </select>
+          {/if}
         </div>
-        {#if inputs > 0}
+        {#if cond === 'related' && !scanning}
+          <div class="line">
+            <select bind:value={watch} disabled={busy} title="The value to follow">
+              {#each app.watches as w (w.id)}<option value={w.id}>{w.label} · {w.value ?? '?'}</option>{/each}
+            </select>
+          </div>
+          <div class="help">
+            Finds the {ty} values that change whenever the watch does, e.g. what a health bar is computed from.
+            Scan, then play: take damage, heal, wait. Results narrow on their own.
+          </div>
+        {:else if inputs > 0 && !following}
           <div class="line">
             <input bind:value placeholder={inputs === 2 ? 'min' : placeholder} spellcheck="false" disabled={busy} />
             {#if inputs === 2}<input bind:value={value2} placeholder="max" spellcheck="false" disabled={busy} />{/if}
@@ -194,7 +262,10 @@
           {/if}
         {/if}
         <div class="line buttons">
-          {#if scanning}
+          {#if following}
+            <button type="button" class="primary" disabled={busy} onclick={stopFollowing}>Stop following</button>
+            <button type="button" disabled={busy} onclick={clear}>New scan</button>
+          {:else if scanning}
             <button type="submit" class="primary" disabled={busy}>Next scan</button>
             <button type="button" disabled={busy} onclick={clear}>New scan</button>
           {:else}
@@ -204,6 +275,19 @@
       </form>
 
       {#if summary}<div class="summary" class:busy>{summary}</div>{/if}
+      {#if related}
+        <div class="related" class:live={following}>
+          {following ? 'Following' : 'Followed'} <b>{related.label}</b> = {related.value ?? '?'}
+          · {related.steps} steps · {related.changes} with a change{related.skipped ? ` · ${related.skipped} skipped` : ''}
+          {#if following && related.changes === 0}<br />Now make it change in the game.{/if}
+          {#if results && related.changes > 0 && (results.count === 0 || (results.count === 1 && results.results[0]?.address === related.address))}
+            <div class="hint">
+              {results.count === 0 ? `No ${results.type} value changed along with it.` : `Only the watch itself is left.`}
+              The values it comes from may be stored as another type: start a new scan with a different one.
+            </div>
+          {/if}
+        </div>
+      {/if}
       {#if problem}<div class="problem">{problem}</div>{/if}
 
       {#if results}
@@ -213,7 +297,7 @@
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div class="row" title="Click to copy the address · right-click for more" onclick={() => copy(`0x${h.address}`)} oncontextmenu={(e) => menu(e, h)}>
-              <span class="addr">0x{h.address}{#if h.symbol}<small>{h.symbol}</small>{/if}</span>
+              <span class="addr">0x{h.address}{#if related && h.address === related.address}<small>the watch</small>{:else if h.symbol}<small>{h.symbol}</small>{/if}</span>
               <span class="val" class:changed={h.value !== h.previous} class:gone={h.value == null}>{h.value ?? 'unreadable'}</span>
               <span class="prev">{h.previous}</span>
             </div>
@@ -253,6 +337,11 @@
   .summary { font: 11px var(--mono); color: var(--dim); }
   .summary.busy { color: var(--accent); }
   .problem { color: var(--bad); font-size: 11px; }
+  .help { color: var(--faint); font-size: 11px; line-height: 1.4; }
+  .ask { font-size: 12px; line-height: 1.45; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--accent); background: rgba(139, 123, 255, 0.12); display: flex; flex-direction: column; gap: 8px; }
+  .related { font-size: 11px; color: var(--dim); padding: 6px 8px; border-radius: 8px; background: #ffffff08; line-height: 1.5; }
+  .related.live { color: var(--text); background: rgba(139, 123, 255, 0.12); }
+  .related .hint { margin-top: 4px; color: var(--k-float); }
   .cols, .row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: baseline; }
   .cols { padding: 0 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
   .list { overflow: auto; min-height: 0; }

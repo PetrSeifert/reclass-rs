@@ -55,7 +55,15 @@ use crate::{
         ROOT,
     },
     inspect::Inspector,
-    scanning::Target,
+    scanning::{
+        Pinned,
+        Target,
+    },
+    watches::{
+        self,
+        Saved,
+        Watch,
+    },
 };
 
 /// What changed as a result of a command, so the caller knows what to broadcast.
@@ -63,20 +71,30 @@ use crate::{
 pub struct Changed {
     pub defs: bool,
     pub session: bool,
+    pub watches: bool,
 }
 
 impl Changed {
     const DEFS: Self = Self {
         defs: true,
         session: true,
+        watches: true,
     };
     const SESSION: Self = Self {
         defs: false,
         session: true,
+        watches: false,
     };
     const NONE: Self = Self {
         defs: false,
         session: false,
+        watches: false,
+    };
+    /// Watches changed, and with them the project (the session's dirty flag).
+    const WATCHES: Self = Self {
+        defs: false,
+        session: true,
+        watches: true,
     };
 }
 
@@ -94,6 +112,8 @@ pub struct Workspace {
     dirty: bool,
     demo: bool,
     seq: u64,
+    watches: Vec<Watch>,
+    next_watch: u64,
 }
 
 struct EvalCtx<'a> {
@@ -167,6 +187,8 @@ impl Workspace {
             dirty: false,
             demo,
             seq: 0,
+            watches: Vec::new(),
+            next_watch: 1,
         };
         ws.load_project(project.unwrap_or_else(blank_project));
         ws
@@ -185,6 +207,19 @@ impl Workspace {
             .get("canvas")
             .and_then(|c| serde_json::from_value(c.clone()).ok())
             .unwrap_or_default();
+        let saved: Vec<Saved> = web
+            .get("watches")
+            .and_then(|w| serde_json::from_value(w.clone()).ok())
+            .unwrap_or_default();
+        self.watches.clear();
+        for w in saved {
+            // A type this version does not know is dropped rather than failing the load.
+            if let Ok(ty) = watches::parse_type(&w.ty) {
+                self.watches
+                    .push(Watch::new(self.next_watch, w.label, w.expr, ty));
+                self.next_watch += 1;
+            }
+        }
         self.resolved.clear();
         self.dirty = false;
         self.match_target();
@@ -198,7 +233,11 @@ impl Workspace {
         ProjectFile {
             memory,
             signatures: self.signatures.clone(),
-            web: Some(json!({ "rootExpr": self.root_expr, "canvas": self.canvas })),
+            web: Some(json!({
+                "rootExpr": self.root_expr,
+                "canvas": self.canvas,
+                "watches": self.watches.iter().map(Watch::saved).collect::<Vec<_>>(),
+            })),
         }
     }
 
@@ -306,6 +345,54 @@ impl Workspace {
             pointer_size: self.memory.pointer_size,
             within,
         }))
+    }
+
+    pub fn has_watches(&self) -> bool {
+        !self.watches.is_empty()
+    }
+
+    /// Re-reads every watch, writing frozen ones back first.
+    pub fn sample_watches(&mut self) {
+        let Some(src) = self.source.clone() else {
+            return;
+        };
+        for i in 0..self.watches.len() {
+            let address = self.eval(&self.watches[i].expr);
+            self.watches[i].sample(&*src, address);
+        }
+    }
+
+    pub fn watches(&self) -> Value {
+        json!({ "type": "watches", "watches": self.watches.iter().map(Watch::view).collect::<Vec<_>>() })
+    }
+
+    fn watch_mut(&mut self, id: u64) -> Result<&mut Watch, String> {
+        self.watches
+            .iter_mut()
+            .find(|w| w.id == id)
+            .ok_or_else(|| format!("no watch #{id}"))
+    }
+
+    /// The watch a related scan follows: where it is now and its type.
+    pub fn watch_pin(&self, id: u64) -> Result<Pinned, String> {
+        let w = self
+            .watches
+            .iter()
+            .find(|w| w.id == id)
+            .ok_or_else(|| format!("no watch #{id}"))?;
+        Ok(Pinned {
+            label: w.label.clone(),
+            address: self.eval(&w.expr)?,
+            ty: w.ty,
+        })
+    }
+
+    fn writer(&self) -> Result<Arc<dyn MemorySource>, String> {
+        let src = self.source.clone().ok_or("not attached")?;
+        if !src.can_write() {
+            return Err("the driver cannot write memory".into());
+        }
+        Ok(src)
     }
 
     pub fn is_attached(&self) -> bool {
@@ -615,6 +702,126 @@ impl Workspace {
                     result["truncated"] = json!(true);
                 }
                 Ok((result, Changed::NONE))
+            }
+            // ---- watches
+            "watches" => Ok((self.watches(), Changed::NONE)),
+            "watchAdd" => {
+                #[derive(Deserialize)]
+                struct A {
+                    expr: String,
+                    #[serde(rename = "type")]
+                    ty: String,
+                    label: Option<String>,
+                }
+                let a: A = arg(p)?;
+                let ty = watches::parse_type(&a.ty)?;
+                if self.source.is_some() {
+                    self.eval(&a.expr)?;
+                }
+                let label = a
+                    .label
+                    .filter(|l| !l.trim().is_empty())
+                    .unwrap_or_else(|| a.expr.clone());
+                let id = self.next_watch;
+                self.next_watch += 1;
+                self.watches.push(Watch::new(id, label, a.expr, ty));
+                self.sample_watches();
+                self.dirty = true;
+                Ok((json!(id), Changed::WATCHES))
+            }
+            "watchUpdate" => {
+                #[derive(Deserialize)]
+                struct A {
+                    id: u64,
+                    label: Option<String>,
+                    expr: Option<String>,
+                    #[serde(rename = "type")]
+                    ty: Option<String>,
+                }
+                let a: A = arg(p)?;
+                let ty = a.ty.as_deref().map(watches::parse_type).transpose()?;
+                if let (Some(e), true) = (&a.expr, self.source.is_some()) {
+                    self.eval(e)?;
+                }
+                let w = self.watch_mut(a.id)?;
+                if let Some(l) = a.label.filter(|l| !l.trim().is_empty()) {
+                    w.label = l;
+                }
+                if a.expr.is_some() || ty.is_some() {
+                    w.expr = a.expr.unwrap_or_else(|| w.expr.clone());
+                    w.ty = ty.unwrap_or(w.ty);
+                    w.frozen = None;
+                    w.reset();
+                }
+                self.sample_watches();
+                self.dirty = true;
+                ok(Changed::WATCHES)
+            }
+            "watchRemove" => {
+                let id = p
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .ok_or("bad params: id")?;
+                self.watch_mut(id)?;
+                self.watches.retain(|w| w.id != id);
+                self.dirty = true;
+                ok(Changed::WATCHES)
+            }
+            "watchFreeze" => {
+                // Holds the value given, or the current one.
+                #[derive(Deserialize)]
+                struct A {
+                    id: u64,
+                    on: bool,
+                    value: Option<String>,
+                }
+                let a: A = arg(p)?;
+                if a.on {
+                    self.writer()?;
+                }
+                let w = self.watch_mut(a.id)?;
+                w.frozen = match (a.on, a.value) {
+                    (false, _) => None,
+                    (true, Some(v)) => Some(w.ty.encode(&v)?),
+                    (true, None) => Some(w.value.clone().ok_or("the value cannot be read")?),
+                };
+                self.sample_watches();
+                Ok((
+                    Value::Null,
+                    Changed {
+                        watches: true,
+                        ..Changed::NONE
+                    },
+                ))
+            }
+            "watchSet" => {
+                #[derive(Deserialize)]
+                struct A {
+                    id: u64,
+                    value: String,
+                }
+                let a: A = arg(p)?;
+                let src = self.writer()?;
+                let (expr, ty) = {
+                    let w = self.watch_mut(a.id)?;
+                    (w.expr.clone(), w.ty)
+                };
+                let bytes = ty.encode(&a.value)?;
+                let address = self.eval(&expr)?;
+                src.write(address, &bytes).map_err(|e| e.to_string())?;
+                // A frozen watch holds the new value from now on.
+                let w = self.watch_mut(a.id)?;
+                if w.frozen.is_some() {
+                    w.frozen = Some(bytes);
+                }
+                self.sample_watches();
+                Ok((
+                    Value::Null,
+                    Changed {
+                        watches: true,
+                        ..Changed::NONE
+                    },
+                ))
             }
             "snapshot" => Ok((self.frame(), Changed::NONE)),
             "state" => Ok((
@@ -1305,6 +1512,76 @@ mod tests {
     }
 
     #[test]
+    fn watches_sample_freeze_and_save_with_the_project() {
+        let mut ws = demo();
+        let id = call(
+            &mut ws,
+            "watchAdd",
+            json!({ "expr": "[$GWorld]+0x20", "type": "f32", "label": "time scale" }),
+        );
+        assert!(ws
+            .handle("watchAdd", &json!({ "expr": "0x10", "type": "text" }))
+            .is_err());
+        assert!(ws
+            .handle("watchAdd", &json!({ "expr": "[", "type": "i32" }))
+            .is_err());
+        ws.sample_watches();
+        let view = ws.watches();
+        let w = &view["watches"][0];
+        assert_eq!(
+            (&w["label"], &w["value"], &w["type"]),
+            (&json!("time scale"), &json!("1.0"), &json!("f32"))
+        );
+        assert_eq!(w["history"], json!([1.0, 1.0]));
+
+        // Frozen, it holds against the process changing it.
+        call(
+            &mut ws,
+            "watchFreeze",
+            json!({ "id": id, "on": true, "value": "0.5" }),
+        );
+        call(
+            &mut ws,
+            "write",
+            json!({ "address": "[$GWorld]+0x20", "ty": "Float", "value": "3" }),
+        );
+        ws.sample_watches();
+        assert_eq!(ws.watches()["watches"][0]["value"], "0.5");
+        call(&mut ws, "watchSet", json!({ "id": id, "value": "2" }));
+        assert_eq!(ws.watches()["watches"][0]["frozen"], "2.0");
+        call(&mut ws, "watchFreeze", json!({ "id": id, "on": false }));
+        assert_eq!(ws.watches()["watches"][0]["frozen"], Value::Null);
+
+        call(
+            &mut ws,
+            "watchUpdate",
+            json!({ "id": id, "expr": "[$GWorld]+0x18", "type": "i32" }),
+        );
+        assert_eq!(
+            ws.watches()["watches"][0]["history"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1,
+            "a new target starts a new history"
+        );
+        let saved = ws.project();
+        let mut other = Workspace::new(Arc::new(DemoProvider), Some(saved), None, true);
+        other.attach(DEMO_PID).unwrap();
+        other.sample_watches();
+        let w = &other.watches()["watches"][0];
+        assert_eq!(
+            (&w["expr"], &w["type"]),
+            (&json!("[$GWorld]+0x18"), &json!("i32"))
+        );
+
+        call(&mut other, "watchRemove", json!({ "id": w["id"] }));
+        assert!(!other.has_watches());
+        let pin = ws.watch_pin(id.as_u64().unwrap()).unwrap();
+        assert_eq!(pin.address, 0x1F3_A8C4_0018);
+    }
+
+    #[test]
     fn drivers_without_writes_refuse_them() {
         struct ReadOnly(DemoSource);
         impl MemorySource for ReadOnly {
@@ -1341,6 +1618,13 @@ mod tests {
             "write",
             &json!({ "address": "0x1F3A8C40000", "ty": "UInt8", "value": "1" }),
         );
+        assert_eq!(err.err().unwrap(), "the driver cannot write memory");
+        let id = call(
+            &mut ws,
+            "watchAdd",
+            json!({ "expr": "0x1F3A8C40000", "type": "u8" }),
+        );
+        let err = ws.handle("watchFreeze", &json!({ "id": id, "on": true }));
         assert_eq!(err.err().unwrap(), "the driver cannot write memory");
     }
 

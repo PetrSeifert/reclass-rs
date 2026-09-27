@@ -143,7 +143,7 @@ async fn authenticated_websocket_receives_session_and_executes_commands() {
         if browser {
             assert_eq!(response.headers()["sec-websocket-protocol"], "reclass");
         }
-        for expected in ["session", "defs", "frame"] {
+        for expected in ["session", "defs", "watches", "frame"] {
             let message = tokio::time::timeout(Duration::from_secs(3), socket.next())
                 .await
                 .unwrap()

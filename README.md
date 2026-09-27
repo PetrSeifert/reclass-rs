@@ -85,6 +85,23 @@ reclass results                 # addresses with their current values
 reclass write 0x1F3A8D12460 i32 100   # set it, if the driver can write memory
 ```
 
+Watches keep an eye on values: each is re-read every tick with a minute of
+history, and can be frozen when the driver can write. A value the game computes
+from others, like a health bar's fill ratio, snaps back when changed; a related
+scan finds what it is computed from. It follows a watch while you play, dropping
+addresses that change while the watch holds still and those that hold still
+when it changes:
+
+```sh
+reclass watch add 0x1F3A8D12470 f32 -l bar  # or: right-click a field, "Watch value"
+reclass watch                               # values, sparklines and ranges
+reclass related bar TYPE                  # the type you guess the inputs have; then play
+reclass results
+reclass related stop
+```
+
+The web UI has both under *Watch* (`W`) and the scanner's *Changes with a watch*.
+
 The driver cannot list memory regions, so scans find readable memory by probing:
 a 32-bit process is covered whole, a 64-bit one through its modules and the heap
 memory their pointers lead to. `--module` or `--range` narrows a scan, and
@@ -130,9 +147,10 @@ Commands (see `server/src/workspace.rs`): `processes`, `attach`, `detach`, `modu
 `setEnum`, `setArray`, `addClass`, `renameClass`, `deleteClass`, `deleteUnusedClasses`,
 `setSignature`, `removeSignature`, `rescan`, `follow`, `closeCard`, `closeAll`,
 `mergeCard`, `toggleExpand`, `moveCards`, `setShare`, `save`, `load`, `newProject`,
-`scan`, `scanNext`, `scanResults`, `scanClear`, `write`.
+`scan`, `scanNext`, `scanResults`, `scanClear`, `scanRelated`, `scanRelatedStop`, `write`,
+`watches`, `watchAdd`, `watchUpdate`, `watchRemove`, `watchFreeze`, `watchSet`.
 The WebSocket at `/ws` takes the same `{id, method, params}` messages and streams
-`session`, `defs` and `frame` updates.
+`session`, `defs`, `watches` and `frame` updates.
 
 ### Build and run
 

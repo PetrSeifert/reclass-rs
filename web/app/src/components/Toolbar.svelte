@@ -84,6 +84,7 @@
   </button>
   <button class="tbtn" class:active={app.modulesOpen} title="Loaded modules (M)" onclick={() => (app.modulesOpen = !app.modulesOpen)}>▣ Modules</button>
   <button class="tbtn" class:active={app.scannerOpen} title="Find addresses by value (S)" onclick={() => (app.scannerOpen = !app.scannerOpen)}>⌕ Scan</button>
+  <button class="tbtn" class:active={app.watchesOpen} title="Watched values and their history (W)" onclick={() => (app.watchesOpen = !app.watchesOpen)}>◉ Watch{#if app.watches.length} <small>{app.watches.length}</small>{/if}</button>
   <button class="tbtn" title="Save project (Ctrl+S)" onclick={save}>
     {s?.dirty ? '● ' : ''}Save
   </button>

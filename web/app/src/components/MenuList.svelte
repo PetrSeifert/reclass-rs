@@ -5,9 +5,16 @@
   let { items, sub = false }: { items: MenuItem[]; sub?: boolean } = $props()
   let openIndex = $state(-1)
 
-  // Keep submenus on screen.
+  // Keep menus on screen.
   function place(el: HTMLDivElement) {
     const r = el.getBoundingClientRect()
+    if (!sub) {
+      // The menu opens at the pointer: near an edge, move it back inside.
+      const root = el.parentElement!
+      if (r.right > innerWidth - 8) root.style.left = `${Math.max(8, innerWidth - r.width - 8)}px`
+      if (r.bottom > innerHeight - 8) root.style.top = `${Math.max(8, innerHeight - r.height - 8)}px`
+      return
+    }
     if (r.right > innerWidth) {
       el.style.left = 'auto'
       el.style.right = 'calc(100% + 4px)'

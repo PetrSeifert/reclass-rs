@@ -2,7 +2,7 @@
 // source of truth: it pushes `session`, `defs` and `frame` messages, and every
 // edit is a command whose effect arrives back as a new frame.
 
-import type { CardView, Defs, Frame, Row, Session } from './types'
+import type { CardView, Defs, Frame, Row, Session, Watch } from './types'
 
 type Reply = { type: 'reply'; id: number; ok: boolean; result?: unknown; error?: string }
 
@@ -19,6 +19,10 @@ export const app = $state({
   editingEnum: null as number | null,
   modulesOpen: false,
   scannerOpen: false,
+  watchesOpen: false,
+  watches: [] as Watch[],
+  /** Watch the scanner should offer to follow, after "Find related values". */
+  relatedWatch: null as number | null,
 })
 
 let socket: WebSocket | null = null
@@ -107,6 +111,7 @@ export function connect(token?: string) {
       case 'session': app.session = msg; break
       case 'defs': app.defs = msg; break
       case 'frame': app.frame = msg; break
+      case 'watches': app.watches = msg.watches; break
       case 'reply': {
         const r = msg as Reply
         const p = pending.get(r.id)

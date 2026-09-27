@@ -120,7 +120,7 @@
       <kbd>F</kbd> fit view · <kbd>T</kbd> tidy layout<br />
       <kbd>F2</kbd> rename · <kbd>Del</kbd> remove field<br />
       {#if app.session?.canWrite}<kbd>Enter</kbd> edit the value in memory<br />{/if}
-      <kbd>M</kbd> modules<br />
+      <kbd>M</kbd> modules · <kbd>S</kbd> scan · <kbd>W</kbd> watches<br />
       Double-click a pointer to follow it<br />
       Right-click fields and cards for more
     </div>

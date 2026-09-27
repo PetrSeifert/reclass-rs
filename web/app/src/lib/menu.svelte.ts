@@ -47,6 +47,25 @@ export function writeBlock(row: Row): string {
   return ''
 }
 
+const WATCH_TYPES: Partial<Record<FieldType, string>> = {
+  Int8: 'i8', Int16: 'i16', Int32: 'i32', Int64: 'i64',
+  UInt8: 'u8', UInt16: 'u16', UInt32: 'u32', UInt64: 'u64',
+  Hex8: 'u8', Hex16: 'u16', Hex32: 'u32', Hex64: 'u64',
+  Float: 'f32', Double: 'f64', Bool: 'u8',
+}
+
+/** The number type to watch a row as, if it holds one number. */
+export function watchType(row: Row): string | null {
+  if (row.ty === 'Enum' || row.ty === 'Pointer') return { 1: 'u8', 2: 'u16', 4: 'u32', 8: 'u64' }[row.size] ?? null
+  return WATCH_TYPES[row.ty] ?? null
+}
+
+export async function addWatch(expr: string, type: string, label?: string) {
+  await call('watchAdd', { expr, type, label })
+  app.watchesOpen = true
+  toast(`Watching ${label ?? expr}`)
+}
+
 export function editValue(card: CardView, row: Row) {
   if (!writeBlock(row)) Object.assign(writing, { card: card.id, key: row.key })
 }
@@ -166,6 +185,11 @@ export function fieldMenu(card: CardView, row: Row): MenuItem[] {
     items.push({ label: 'Insert bytes below', submenu: sizes.map((n) => ({ label: `${n} bytes`, hint: `0x${hex(n)}`, onClick: () => call('insertBytes', { ...ref, count: n, after: true }) })) })
   }
   items.push({ sep: true })
+  const wt = watchType(row)
+  if (wt) {
+    const label = row.name ?? `${card.className}+0x${hex(row.offset)}`
+    items.push({ label: 'Watch value', hint: wt, onClick: () => addWatch(`0x${row.address}`, wt, label) })
+  }
   items.push({ label: 'Copy address', hint: row.address, onClick: () => copy(row.address) })
   items.push({ label: 'Copy value', onClick: () => copy(row.value) })
   if (row.pointer) items.push({ label: 'Copy pointer', hint: row.pointer, onClick: () => copy(row.pointer!) })

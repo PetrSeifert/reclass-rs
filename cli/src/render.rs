@@ -211,7 +211,42 @@ pub fn scan_results(r: &Value, offset: u64) -> String {
             ]
         })
         .collect();
-    let mut out = table(&rows);
+    let mut out = String::new();
+    let related = &r["related"];
+    if related.is_object() {
+        out.push_str(&format!(
+            "{} {} (0x{} = {}): {} steps, {} with a change, {} skipped\n",
+            if related["running"] == true {
+                "following"
+            } else {
+                "followed"
+            },
+            str_of(&related["label"]),
+            str_of(&related["address"]),
+            related["value"].as_str().unwrap_or("<unreadable>"),
+            related["steps"],
+            related["changes"],
+            related["skipped"],
+        ));
+    }
+    out.push_str(&table(&rows));
+    // Only the watch left, or nothing: its inputs likely have another type.
+    let list = r["results"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let only_watch = list.len() == 1 && list[0]["address"] == related["address"];
+    if related.is_object() && u64_of(&related["changes"]) > 0 && (list.is_empty() || only_watch) {
+        out.push_str(&format!(
+            "{} The values it comes from may be stored as another type: start again with a different one.
+",
+            if only_watch {
+                "Only the watch itself is left.".to_string()
+            } else {
+                format!("No {} value changed along with it.", str_of(&r["type"]))
+            }
+        ));
+    }
     let count = u64_of(&r["count"]);
     let shown = offset + rows.len() as u64;
     if shown < count {
@@ -221,6 +256,85 @@ pub fn scan_results(r: &Value, offset: u64) -> String {
         ));
     }
     out
+}
+
+/// A number with at most three decimals and no trailing zeros.
+fn short(v: f64) -> String {
+    let s = format!("{v:.3}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" {
+        "0".into()
+    } else {
+        s.into()
+    }
+}
+
+/// The last `width` samples as block characters, scaled between their extremes.
+fn sparkline(history: &[Value], width: usize) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let recent = &history[history.len().saturating_sub(width)..];
+    let nums: Vec<f64> = recent.iter().filter_map(Value::as_f64).collect();
+    let (lo, hi) = nums
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+    recent
+        .iter()
+        .map(|v| match v.as_f64() {
+            None => ' ',
+            Some(_) if hi <= lo => BARS[3],
+            Some(v) => BARS[((v - lo) / (hi - lo) * 7.0).round() as usize],
+        })
+        .collect()
+}
+
+/// Watches with their values, the last samples and their range.
+pub fn watches(r: &Value) -> String {
+    let list = r["watches"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if list.is_empty() {
+        return "no watches; add one with `reclass watch add EXPR TYPE`\n".into();
+    }
+    let rows: Vec<Vec<String>> = list
+        .iter()
+        .map(|w| {
+            let history = w["history"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let nums: Vec<f64> = history.iter().filter_map(Value::as_f64).collect();
+            let range = match (
+                nums.iter().copied().reduce(f64::min),
+                nums.iter().copied().reduce(f64::max),
+            ) {
+                (Some(lo), Some(hi)) if lo != hi => format!("{}..{}", short(lo), short(hi)),
+                _ => String::new(),
+            };
+            let value = match (&w["value"], &w["error"]) {
+                (Value::String(v), _) => v.clone(),
+                (_, e) => format!("<{}>", str_of(e)),
+            };
+            vec![
+                format!("#{}", w["id"]),
+                str_of(&w["label"]).to_string(),
+                w["address"]
+                    .as_str()
+                    .map(|a| format!("0x{a}"))
+                    .unwrap_or_default(),
+                str_of(&w["type"]).to_string(),
+                value,
+                if w["frozen"].is_string() {
+                    "frozen".into()
+                } else {
+                    String::new()
+                },
+                sparkline(history, 40),
+                range,
+            ]
+        })
+        .collect();
+    table(&rows)
 }
 
 /// 16 bytes per line with an ASCII column.

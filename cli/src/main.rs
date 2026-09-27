@@ -94,6 +94,38 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum WatchAction {
+    /// Watch the number at an address expression, re-evaluated every tick.
+    Add {
+        expr: String,
+        /// i8..i64, u8..u64, f32 or f64.
+        #[arg(value_name = "TYPE")]
+        ty: String,
+        #[arg(short, long)]
+        label: Option<String>,
+    },
+    /// Stop watching (id or label).
+    Rm {
+        watch: String,
+    },
+    /// Hold the value, or VALUE, by writing it back every tick. Needs a driver that can write.
+    Freeze {
+        watch: String,
+        #[arg(allow_hyphen_values = true)]
+        value: Option<String>,
+    },
+    Unfreeze {
+        watch: String,
+    },
+    /// Write VALUE once.
+    Set {
+        watch: String,
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
     /// Attached process, root address and project.
     Status,
@@ -269,6 +301,37 @@ Converting keeps every other field at its offset: shrinking pointers are padded
 with hex fields and growing pointers consume the bytes after them."
     )]
     PointerSize { size: Option<u64> },
+    /// Values to keep an eye on, with a short history. Lists them without a subcommand.
+    Watch {
+        #[command(subcommand)]
+        action: Option<WatchAction>,
+    },
+    /// Find the values another one is computed from: follow a watch while you play.
+    #[command(after_help = "\
+Snapshots memory as TYPE, then keeps narrowing on its own: while the watch holds
+still it drops addresses that change, and when the watch changes it drops those
+that do not. Play normally, then check `reclass results`. The watch itself shows
+up too if it has the same type. `reclass related stop` ends it; `next` narrows
+the results by hand afterwards.
+
+  reclass watch add 0x1F3A8D12470 f32 -l bar
+  reclass related bar u16      # try the types the inputs could have
+  reclass results")]
+    Related {
+        /// Watch id or label, or `stop`.
+        watch: String,
+        #[arg(value_name = "TYPE")]
+        ty: Option<String>,
+        /// Only scan this module's image.
+        #[arg(long, conflicts_with = "range")]
+        module: Option<String>,
+        /// Only scan from START to END (expressions).
+        #[arg(long, num_args = 2, value_names = ["START", "END"])]
+        range: Option<Vec<String>>,
+        /// Also scan read-only parts of module images: code and constants.
+        #[arg(long)]
+        read_only: bool,
+    },
     /// Write a value into the process, typed as TYPE. Needs a driver that can write.
     #[command(
         after_help = "VALUE is written the way `view` shows it: 100, -1, 0x64, 1.5, true, (1, 2, 3),
@@ -312,6 +375,23 @@ impl App {
 
     fn defs(&self) -> Result<Defs> {
         Ok(Defs::from_state(&self.state()?))
+    }
+
+    /// A watch by id (`3` or `#3`) or label.
+    fn watch_id(&self, s: &str) -> Result<u64> {
+        if let Ok(id) = s.trim_start_matches('#').parse() {
+            return Ok(id);
+        }
+        let list = self.call("watches", json!({}))?;
+        let found = list["watches"].as_array().into_iter().flatten().find(|w| {
+            w["label"]
+                .as_str()
+                .is_some_and(|l| l.eq_ignore_ascii_case(s))
+        });
+        match found {
+            Some(w) => Ok(w["id"].as_u64().unwrap_or(0)),
+            None => bail!("no watch '{s}' (see `reclass watch`)"),
+        }
     }
 
     /// One line describing a field after an edit, so the result can be checked.
@@ -838,15 +918,86 @@ impl App {
                 if self.json {
                     return raw(session["pointerSize"].clone());
                 }
-                Ok(format!(
-                    "{}-byte pointers
-",
-                    session["pointerSize"]
-                ))
+                Ok(format!("{}-byte pointers\n", session["pointerSize"]))
             }
             DeleteSig { name } => {
                 self.call("removeSignature", json!({ "name": name }))?;
                 Ok(format!("deleted ${name}\n"))
+            }
+            Watch { action } => {
+                let id = |me: &Self, w: &str| me.watch_id(w);
+                match action {
+                    None => {}
+                    Some(WatchAction::Add { expr, ty, label }) => {
+                        let id = self.call(
+                            "watchAdd",
+                            json!({ "expr": expr, "type": ty, "label": label }),
+                        )?;
+                        if self.json {
+                            return raw(id);
+                        }
+                    }
+                    Some(WatchAction::Rm { watch }) => {
+                        self.call("watchRemove", json!({ "id": id(self, &watch)? }))?;
+                    }
+                    Some(WatchAction::Freeze { watch, value }) => {
+                        self.call(
+                            "watchFreeze",
+                            json!({ "id": id(self, &watch)?, "on": true, "value": value }),
+                        )?;
+                    }
+                    Some(WatchAction::Unfreeze { watch }) => {
+                        self.call(
+                            "watchFreeze",
+                            json!({ "id": id(self, &watch)?, "on": false }),
+                        )?;
+                    }
+                    Some(WatchAction::Set { watch, value }) => {
+                        self.call(
+                            "watchSet",
+                            json!({ "id": id(self, &watch)?, "value": value }),
+                        )?;
+                    }
+                }
+                let w = self.call("watches", json!({}))?;
+                if self.json {
+                    return raw(w);
+                }
+                Ok(render::watches(&w))
+            }
+            Related {
+                watch,
+                ty,
+                module,
+                range,
+                read_only,
+            } => {
+                if watch == "stop" {
+                    self.call("scanRelatedStop", json!({}))?;
+                    return Ok("stopped; the results stay\n".into());
+                }
+                let Some(ty) = ty else {
+                    bail!("pass the TYPE to look for, e.g. `reclass related {watch} i32`");
+                };
+                let mut params =
+                    json!({ "watch": self.watch_id(&watch)?, "type": ty, "readOnly": read_only });
+                if let Some(m) = module {
+                    params["module"] = json!(m);
+                }
+                if let Some(r) = range {
+                    params["start"] = json!(r[0]);
+                    params["end"] = json!(r[1]);
+                }
+                let r = self.call("scanRelated", params)?;
+                if self.json {
+                    return raw(r);
+                }
+                Ok(format!(
+                    "following {watch}: {} {} addresses in {} ms. Play, then `reclass results`.\n",
+                    r["count"],
+                    r["type"].as_str().unwrap_or(""),
+                    r["ms"]
+                ))
             }
             Write { expr, ty, value } => {
                 let mut params = self.defs()?.type_spec(&ty)?;
@@ -858,8 +1009,7 @@ impl App {
                 }
                 let bytes = r["bytes"].as_str().unwrap_or("");
                 Ok(format!(
-                    "wrote {} bytes at 0x{}: {}
-",
+                    "wrote {} bytes at 0x{}: {}\n",
                     bytes.len() / 2,
                     r["address"].as_str().unwrap_or("?"),
                     bytes

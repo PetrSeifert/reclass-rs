@@ -7,6 +7,7 @@ mod access;
 mod canvas;
 mod inspect;
 mod scanning;
+mod watches;
 mod workspace;
 
 use std::{
@@ -98,7 +99,7 @@ struct Args {
 struct AppState {
     ws: Arc<Mutex<Workspace>>,
     events: broadcast::Sender<Arc<str>>,
-    scan: Arc<Mutex<Option<scanning::Session>>>,
+    scan: scanning::Shared,
 }
 
 impl AppState {
@@ -123,6 +124,9 @@ impl AppState {
                     if changed.defs {
                         state.publish(&ws.defs());
                     }
+                    if changed.watches {
+                        state.publish(&ws.watches());
+                    }
                     let frame = ws.frame();
                     state.publish(&frame);
                     json!({ "ok": true, "result": result })
@@ -141,9 +145,16 @@ impl AppState {
     async fn exec_scan(&self, method: String, params: Value) -> Value {
         let state = self.clone();
         tokio::task::spawn_blocking(move || {
-            let target = state.ws.lock().unwrap().scan_target(&params);
-            let result = target.and_then(|target| {
-                scanning::handle(&mut state.scan.lock().unwrap(), target, &method, &params)
+            let lookup = {
+                let ws = state.ws.lock().unwrap();
+                let pinned = match params.get("watch").and_then(Value::as_u64) {
+                    Some(id) if method == "scanRelated" => ws.watch_pin(id).map(Some),
+                    _ => Ok(None),
+                };
+                ws.scan_target(&params).and_then(|t| Ok((t, pinned?)))
+            };
+            let result = lookup.and_then(|(target, pinned)| {
+                scanning::handle(&state.scan, target, pinned, &method, &params)
             });
             match result {
                 Ok(result) => json!({ "ok": true, "result": result }),
@@ -194,7 +205,7 @@ async fn client(socket: WebSocket, state: AppState) {
         let state = state.clone();
         tokio::task::spawn_blocking(move || {
             let mut ws = state.ws.lock().unwrap();
-            [ws.session(), ws.defs(), ws.frame()].map(|v| v.to_string())
+            [ws.session(), ws.defs(), ws.watches(), ws.frame()].map(|v| v.to_string())
         })
         .await
         .unwrap()
@@ -285,29 +296,34 @@ async fn main() -> anyhow::Result<()> {
         scan: Arc::default(),
     };
 
-    // Live frames.
+    // Live frames, and watches, which keep their history without a browser too.
     {
         let state = state.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(args.tick_ms.max(50)));
             loop {
                 interval.tick().await;
-                if state.events.receiver_count() == 0 {
-                    continue;
-                }
+                let clients = state.events.receiver_count() > 0;
                 let s = state.clone();
-                let frame = tokio::task::spawn_blocking(move || {
+                let (frame, watches) = tokio::task::spawn_blocking(move || {
                     let mut ws = s.ws.lock().unwrap();
-                    (ws.live && ws.is_attached()).then(|| {
+                    if !ws.is_attached() {
+                        return (None, None);
+                    }
+                    let live = clients && ws.live;
+                    if live || ws.has_watches() {
                         ws.tick();
-                        ws.frame()
-                    })
+                    }
+                    let watches = ws.has_watches().then(|| {
+                        ws.sample_watches();
+                        ws.watches()
+                    });
+                    (live.then(|| ws.frame()), watches)
                 })
                 .await
-                .ok()
-                .flatten();
-                if let Some(f) = frame {
-                    state.publish(&f);
+                .unwrap_or((None, None));
+                for v in [watches, frame].into_iter().flatten() {
+                    state.publish(&v);
                 }
             }
         });

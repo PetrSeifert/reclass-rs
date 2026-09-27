@@ -125,7 +125,23 @@ export interface ScanHit {
   symbol: string | null
 }
 
-export interface ScanResults { count: number; type: string; results: ScanHit[] }
+/** A related scan: follows a watch and keeps what changes when it does. */
+export interface RelatedScan { label: string; address: string; value: string | null; running: boolean; steps: number; changes: number; skipped: number }
+export interface ScanResults { count: number; type: string; results: ScanHit[]; related?: RelatedScan }
+
+export interface Watch {
+  id: number
+  label: string
+  expr: string
+  type: string
+  address: string | null
+  error: string | null
+  value: string | null
+  /** The value written back every tick, while frozen. */
+  frozen: string | null
+  /** Recent samples, oldest first; null where the value could not be read. */
+  history: (number | null)[]
+}
 
 export const TYPE_GROUPS: [string, FieldType[]][] = [
   ['Hex', ['Hex64', 'Hex32', 'Hex16', 'Hex8']],

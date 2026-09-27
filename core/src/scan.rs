@@ -409,6 +409,54 @@ impl ScanType {
             ScanType::Bytes => "bytes",
         }
     }
+
+    /// Bytes a value of this type takes; text and bytes have no fixed size.
+    pub fn size(self) -> Option<usize> {
+        match self {
+            ScanType::Num(n) => Some(n.size()),
+            _ => None,
+        }
+    }
+
+    /// A number of this type as f64, e.g. to plot it.
+    pub fn number(self, bytes: &[u8]) -> Option<f64> {
+        match self {
+            ScanType::Num(n) if bytes.len() >= n.size() => Some(n.read(bytes).f()),
+            _ => None,
+        }
+    }
+
+    /// A value of this type as text.
+    pub fn format(self, bytes: &[u8]) -> String {
+        match self {
+            ScanType::Num(n) => match n.read(bytes) {
+                Num::I(i) => i.to_string(),
+                Num::F(f) => fmt_float(f),
+            },
+            ScanType::Text => format!("\"{}\"", String::from_utf8_lossy(bytes).escape_debug()),
+            ScanType::Bytes => bytes
+                .iter()
+                .map(|b| format!("{b:02X}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+
+    /// The bytes that store `text` as this type, e.g. to write it.
+    pub fn encode(self, text: &str) -> Result<Vec<u8>, String> {
+        match (parse_value(self, text)?, self) {
+            (Value::Int(v), ScanType::Num(n)) => {
+                Ok((v as u128 as u64).to_le_bytes()[..n.size()].to_vec())
+            }
+            (Value::Float { v, .. }, ScanType::Num(Numeric::F32)) => {
+                Ok((v as f32).to_le_bytes().to_vec())
+            }
+            (Value::Float { v, .. }, _) => Ok(v.to_le_bytes().to_vec()),
+            (Value::Pattern { bytes, mask }, _) if mask.iter().all(|m| *m == 0xFF) => Ok(bytes),
+            (Value::Pattern { .. }, _) => Err("?? wildcards cannot be written".into()),
+            (Value::Int(_), _) => unreachable!("integers are only parsed for numbers"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -540,6 +588,15 @@ pub enum Next {
     Decreased,
     IncreasedBy(String),
     DecreasedBy(String),
+}
+
+/// What a deferred step keeps, decided after it has read memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keep {
+    Changed,
+    Unchanged,
+    /// Every readable address, taking its current value as the new baseline.
+    All,
 }
 
 enum Test {
@@ -746,6 +803,7 @@ enum Candidates {
 }
 
 /// One result: an address and its value at the last scan.
+#[derive(Clone)]
 pub struct Hit {
     pub address: u64,
     pub value: Vec<u8>,
@@ -770,6 +828,38 @@ fn snapshot(src: &dyn MemorySource, r: Region) -> (Vec<u8>, Vec<bool>) {
         readable[off / PAGE as usize..(off + len).div_ceil(PAGE as usize)].fill(true);
     });
     (bytes, readable)
+}
+
+/// Current values of the sorted `addresses`, `size` bytes each, and whether
+/// each could be read.
+fn read_listed(src: &dyn MemorySource, addresses: &[u64], size: usize) -> (Vec<u8>, Vec<bool>) {
+    let mut cur = vec![0u8; addresses.len() * size];
+    let mut ok = vec![false; addresses.len()];
+    let mut buf = Vec::new();
+    let mut i = 0;
+    while i < addresses.len() {
+        // Read the candidates of one 64 KiB span together.
+        let start = addresses[i];
+        let mut j = i + 1;
+        while j < addresses.len() && addresses[j] + size as u64 - start <= CHUNK {
+            j += 1;
+        }
+        buf.resize((addresses[j - 1] + size as u64 - start) as usize, 0);
+        let whole = src.read(start, &mut buf).is_ok();
+        for k in i..j {
+            let out = &mut cur[k * size..(k + 1) * size];
+            ok[k] = if whole {
+                let off = (addresses[k] - start) as usize;
+                out.copy_from_slice(&buf[off..off + size]);
+                true
+            } else {
+                // Part of the span is gone: read what is left one by one.
+                src.read(addresses[k], out).is_ok()
+            };
+        }
+        i = j;
+    }
+    (cur, ok)
 }
 
 /// Where the aligned slots of `len` bytes at `base` that hold a whole `size`
@@ -917,47 +1007,104 @@ impl Scan {
                 }
             }
             Candidates::Listed { addresses, values } => {
+                let (cur, ok) = read_listed(src, addresses, size);
                 let mut kept = Vec::new();
                 let mut kept_values = Vec::new();
-                let mut buf = Vec::new();
-                let mut i = 0;
-                while i < addresses.len() {
-                    // Read the candidates of one 64 KiB span together.
-                    let start = addresses[i];
-                    let mut j = i + 1;
-                    while j < addresses.len() && addresses[j] + size as u64 - start <= CHUNK {
-                        j += 1;
+                for (k, a) in addresses.iter().enumerate() {
+                    let c = &cur[k * size..(k + 1) * size];
+                    if ok[k] && m.matches(c, &values[k * size..(k + 1) * size]) {
+                        kept.push(*a);
+                        kept_values.extend_from_slice(c);
                     }
-                    buf.resize((addresses[j - 1] + size as u64 - start) as usize, 0);
-                    let whole = src.read(start, &mut buf).is_ok();
-                    for k in i..j {
-                        let a = addresses[k];
-                        let off = (a - start) as usize;
-                        // Part of the span is gone: read what is left one by one.
-                        let one;
-                        let cur = if whole {
-                            &buf[off..off + size]
-                        } else {
-                            match src.read_vec(a, size) {
-                                Some(v) => {
-                                    one = v;
-                                    &one[..]
-                                }
-                                None => continue,
-                            }
-                        };
-                        if m.matches(cur, &values[k * size..(k + 1) * size]) {
-                            kept.push(a);
-                            kept_values.extend_from_slice(cur);
-                        }
-                    }
-                    i = j;
                 }
                 *addresses = kept;
                 *values = kept_values;
             }
         }
         Ok(())
+    }
+
+    /// Re-reads the candidates, then asks `decide` what to keep. `None` leaves
+    /// the scan as it was, so a caller can look at another value once memory
+    /// has been read and drop a step it cannot interpret.
+    pub fn next_deferred(
+        &mut self,
+        src: &dyn MemorySource,
+        decide: impl FnOnce() -> Option<Keep>,
+    ) -> Option<Keep> {
+        let size = self.size;
+        let keep = match &mut self.candidates {
+            Candidates::Dense(blocks) => {
+                // Per block: slots still readable, slots that changed, and the
+                // new bytes, kept only for blocks where something changed.
+                let mut pending = Vec::with_capacity(blocks.len());
+                for b in blocks.iter() {
+                    let region = Region {
+                        base: b.base,
+                        size: b.bytes.len() as u64,
+                    };
+                    let (cur, readable) = snapshot(src, region);
+                    let mut ok = vec![0u64; b.alive.len()];
+                    let mut changed = vec![0u64; b.alive.len()];
+                    let mut any = false;
+                    for i in b.alive() {
+                        let s = b.offset(i);
+                        let pages = s / PAGE as usize..=(s + size - 1) / PAGE as usize;
+                        if !readable[pages].iter().all(|r| *r) {
+                            continue;
+                        }
+                        ok[i / 64] |= 1 << (i % 64);
+                        if cur[s..s + size] != b.bytes[s..s + size] {
+                            changed[i / 64] |= 1 << (i % 64);
+                            any = true;
+                        }
+                    }
+                    pending.push((ok, changed, any.then_some(cur)));
+                }
+                let keep = decide()?;
+                for (b, (ok, changed, cur)) in blocks.iter_mut().zip(pending) {
+                    for (w, alive) in b.alive.iter_mut().enumerate() {
+                        *alive = match keep {
+                            Keep::Changed => ok[w] & changed[w],
+                            Keep::Unchanged => ok[w] & !changed[w],
+                            Keep::All => ok[w],
+                        };
+                    }
+                    // What survives an unchanged step still holds the old bytes.
+                    if let (Some(cur), false) = (cur, keep == Keep::Unchanged) {
+                        b.bytes = cur;
+                    }
+                }
+                blocks.retain(|b| b.count() > 0);
+                if self.count() <= MAX_LISTED {
+                    self.list();
+                }
+                keep
+            }
+            Candidates::Listed { addresses, values } => {
+                let (cur, ok) = read_listed(src, addresses, size);
+                let keep = decide()?;
+                let mut kept = Vec::new();
+                let mut kept_values = Vec::new();
+                for (k, a) in addresses.iter().enumerate() {
+                    let c = &cur[k * size..(k + 1) * size];
+                    let changed = c != &values[k * size..(k + 1) * size];
+                    let wanted = match keep {
+                        Keep::Changed => changed,
+                        Keep::Unchanged => !changed,
+                        Keep::All => true,
+                    };
+                    if ok[k] && wanted {
+                        kept.push(*a);
+                        kept_values.extend_from_slice(c);
+                    }
+                }
+                *addresses = kept;
+                *values = kept_values;
+                keep
+            }
+        };
+        Some(keep)
     }
 
     /// Turns snapshots into a list of the addresses still alive.
@@ -1023,18 +1170,7 @@ impl Scan {
 
     /// A value of this scan's type as text.
     pub fn format(&self, bytes: &[u8]) -> String {
-        match self.ty {
-            ScanType::Num(n) => match n.read(bytes) {
-                Num::I(i) => i.to_string(),
-                Num::F(f) => fmt_float(f),
-            },
-            ScanType::Text => format!("\"{}\"", String::from_utf8_lossy(bytes).escape_debug()),
-            ScanType::Bytes => bytes
-                .iter()
-                .map(|b| format!("{b:02X}"))
-                .collect::<Vec<_>>()
-                .join(" "),
-        }
+        self.ty.format(bytes)
     }
 }
 
@@ -1134,6 +1270,53 @@ mod tests {
         scan.next(&src, &Next::Decreased).unwrap();
         scan.next(&src, &Next::Exact("70".into())).unwrap();
         assert_eq!(addresses(&scan), vec![SPOT + 0x1FFC]);
+    }
+
+    #[test]
+    fn deferred_steps_keep_what_changed_with_another_value() {
+        let src = source();
+        let (health, noise, other) = (SPOT + 0x10, SPOT + 0x20, SPOT + 0x30);
+        for (a, v) in [(health, 100), (noise, 7), (other, 1)] {
+            src.poke(a, &(v as i32).to_le_bytes());
+        }
+        let ty = ScanType::parse("i32").unwrap();
+        let mut scan = Scan::first(&src, &spot(), ty, &First::Unknown, None).unwrap();
+        let alive = |scan: &Scan, a: u64| addresses(scan).contains(&a);
+
+        // Nothing happened to the pinned value: whatever changed is noise.
+        src.poke(noise, &8i32.to_le_bytes());
+        let kept = scan.next_deferred(&src, || Some(Keep::Unchanged));
+        assert_eq!(kept, Some(Keep::Unchanged));
+        assert!(alive(&scan, health) && !alive(&scan, noise));
+
+        // A step that cannot be read changes nothing, even what differs now.
+        src.poke(other, &2i32.to_le_bytes());
+        assert_eq!(scan.next_deferred(&src, || None), None);
+        assert!(alive(&scan, other));
+
+        // Took damage: keep what changed, and remember the new values.
+        src.poke(health, &93i32.to_le_bytes());
+        scan.next_deferred(&src, || Some(Keep::Changed));
+        assert_eq!(addresses(&scan), vec![health, other]);
+        scan.next_deferred(&src, || Some(Keep::Unchanged));
+        assert_eq!(
+            addresses(&scan),
+            vec![health, other],
+            "values were re-based"
+        );
+        assert_eq!(scan.hits(0, 1)[0].value, 93i32.to_le_bytes());
+    }
+
+    #[test]
+    fn types_format_and_encode_values() {
+        let f32t = ScanType::parse("f32").unwrap();
+        assert_eq!(f32t.encode("0.5").unwrap(), 0.5f32.to_le_bytes());
+        assert_eq!(f32t.number(&0.5f32.to_le_bytes()), Some(0.5));
+        let i16t = ScanType::parse("i16").unwrap();
+        assert_eq!(i16t.encode("-2").unwrap(), [0xFE, 0xFF]);
+        assert_eq!(i16t.format(&[0xFE, 0xFF]), "-2");
+        assert!(i16t.encode("70000").is_err());
+        assert!(ScanType::Bytes.encode("48 ??").is_err());
     }
 
     #[test]
