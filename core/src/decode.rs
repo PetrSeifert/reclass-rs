@@ -172,6 +172,10 @@ impl<'a> Decoder<'a> {
                 .map(|s| u64::from_le_bytes(s.try_into().unwrap()))
         };
         let u32_at = |i: usize| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+        let pointer = || match self.layout.pointer_size {
+            4 => u32_at(0) as u64,
+            _ => u64_at(0).unwrap(),
+        };
         let f32_at = |i: usize| f32::from_le_bytes(b[i..i + 4].try_into().unwrap()) as f64;
         use FieldType::*;
         match fd.field_type {
@@ -198,16 +202,16 @@ impl<'a> Decoder<'a> {
                 d.value = format!("\"{s}\"");
             }
             TextPointer => {
-                let p = u64_at(0).unwrap();
+                let p = pointer();
                 d.pointer = Some(p);
                 d.value = match (p, self.source.read_c_string(p, 64)) {
                     (0, _) => "nullptr".into(),
                     (_, Some(s)) => format!("\"{s}\""),
                     (_, None) => "<bad ptr>".into(),
                 };
-                d.hints.push(format!("@ {p:012X}"));
+                d.hints.push(format!("@ {}", self.fmt_pointer(p)));
             }
-            Pointer | EncryptedPointer => self.decode_pointer(&mut d, fd, u64_at(0).unwrap()),
+            Pointer | EncryptedPointer => self.decode_pointer(&mut d, fd, pointer()),
             Enum => self.decode_enum(&mut d, fd, size as usize),
             ClassInstance => match fd.class_id.and_then(|id| self.layout.classes.get(id)) {
                 Some(c) => {
@@ -249,32 +253,7 @@ impl<'a> Decoder<'a> {
         }
         d.value = format!("{n:0width$X}", width = size * 2);
         if n != 0 {
-            match size {
-                8 => {
-                    if let Some(sym) = self.symbolize(n) {
-                        d.hints.push(format!("-> {sym}"));
-                    } else if let Some((lo, hi)) = float_pair(n) {
-                        d.hints
-                            .push(format!("f32 {}, {}", fmt_float(lo), fmt_float(hi)));
-                    } else if n < 0x1_0000_0000 {
-                        d.hints.push(format!("int {n}"));
-                    } else if self.readable(n) {
-                        d.hints.push("-> ptr".into());
-                    } else if (n >> 32) < 100_000 && (n & 0xFFFF_FFFF) < 100_000 {
-                        d.hints
-                            .push(format!("i32 {}, {}", n & 0xFFFF_FFFF, n >> 32));
-                    }
-                }
-                4 => {
-                    let f = f32::from_bits(n as u32) as f64;
-                    if f.abs() > 1e-4 && f.abs() < 1e7 {
-                        d.hints.push(format!("f32 {}", fmt_float(f)));
-                    } else {
-                        d.hints.push(format!("int {}", n as u32 as i32));
-                    }
-                }
-                _ => d.hints.push(format!("int {n}")),
-            }
+            d.hints.extend(self.hex_hint(n, size));
         }
         let text = ascii(&b[..size]);
         if text
@@ -286,13 +265,67 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// What a hex field's value probably is. Only pointer-sized fields are
+    /// taken for pointers, so a 32-bit target's dwords can be pointers too.
+    fn hex_hint(&self, n: u64, size: usize) -> Option<String> {
+        let word = size as u64 == self.layout.pointer_size;
+        if word {
+            if let Some(sym) = self.symbolize(n) {
+                return Some(format!("-> {sym}"));
+            }
+        }
+        match size {
+            8 => {
+                if let Some((lo, hi)) = float_pair(n) {
+                    return Some(format!("f32 {}, {}", fmt_float(lo), fmt_float(hi)));
+                }
+                if n < 0x1_0000_0000 {
+                    return Some(format!("int {n}"));
+                }
+            }
+            4 => {
+                if let Some(f) = plausible_f32(n as u32) {
+                    return Some(format!("f32 {}", fmt_float(f)));
+                }
+            }
+            _ => return Some(format!("int {n}")),
+        }
+        // Text is often a readable address in a dense 32-bit address space:
+        // three or more printable bytes, optionally ending in NULs.
+        let bytes = &n.to_le_bytes()[..size];
+        let printable = bytes
+            .iter()
+            .take_while(|b| (0x20..0x7F).contains(*b))
+            .count();
+        let text = printable >= 3 && bytes[printable..].iter().all(|b| *b == 0);
+        if word && n >= 0x1_0000 && !text && self.readable(n) {
+            return Some("-> ptr".into());
+        }
+        match size {
+            4 => Some(format!("int {}", n as u32 as i32)),
+            _ if (n >> 32) < 100_000 && (n & 0xFFFF_FFFF) < 100_000 => {
+                Some(format!("i32 {}, {}", n & 0xFFFF_FFFF, n >> 32))
+            }
+            _ => None,
+        }
+    }
+
+    /// A pointer value, zero-padded to the target's address width.
+    pub fn fmt_pointer(&self, p: u64) -> String {
+        match self.layout.pointer_size {
+            4 => format!("{p:08X}"),
+            _ => format!("{p:012X}"),
+        }
+    }
+
     fn decode_pointer(&self, d: &mut Decoded, fd: &FieldDefinition, raw: u64) {
         let p = if fd.field_type == FieldType::EncryptedPointer {
-            d.hints.push(format!("enc {raw:016X}"));
+            let width = self.layout.pointer_size as usize * 2;
+            d.hints.push(format!("enc {raw:0width$X}"));
             match self.source.decrypt(raw) {
                 Ok(v) => v,
                 Err(e) => {
-                    d.value = format!("{raw:016X}");
+                    d.value = format!("{raw:0width$X}");
                     d.error = Some(format!("decrypt failed: {e}"));
                     return;
                 }
@@ -305,7 +338,7 @@ impl<'a> Decoder<'a> {
             d.value = "nullptr".into();
             return;
         }
-        d.value = format!("{p:012X}");
+        d.value = self.fmt_pointer(p);
         if !self.readable(p) {
             d.error = Some("invalid pointer".into());
             return;
@@ -546,6 +579,27 @@ mod tests {
             assert_eq!(&decoded.value, expected);
             assert_eq!(decoded.error, None);
         }
+    }
+
+    #[test]
+    fn pointers_of_32_bit_targets_are_dwords() {
+        let base = 0x1F3_0000_1000;
+        let source = DemoSource::new();
+        source.poke(base, &[0x78, 0x56, 0x34, 0x12, 0x2A, 0, 0, 0]);
+        let mut class = ClassDefinition::new("Small".into());
+        class.add_named_field("next".into(), FieldType::Pointer);
+        class.add_named_field("count".into(), FieldType::Int32);
+        let mut ms = MemoryStructure::new("root".into(), base, class);
+        ms.pointer_size = 4;
+        let layout = Layout::of(&ms);
+        let decoder = Decoder::new(&source, layout);
+        let def = ms.class_registry.get(ms.root_class.class_id).unwrap();
+        assert_eq!(layout.field_offsets(def.id), vec![(0, 4), (4, 4)]);
+        let next = decoder.decode(&def.fields[0], base);
+        assert_eq!(next.pointer, Some(0x1234_5678));
+        assert_eq!(next.value, "12345678");
+        assert_eq!(next.error.as_deref(), Some("invalid pointer"));
+        assert_eq!(decoder.decode(&def.fields[1], base + 4).value, "42");
     }
 
     #[test]

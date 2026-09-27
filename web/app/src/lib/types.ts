@@ -31,6 +31,8 @@ export interface Session {
   projectPath: string | null
   dirty: boolean
   demo: boolean
+  /** 8, or 4 for 32-bit processes. */
+  pointerSize: number
 }
 
 export interface FieldDef { id: number; name: string | null; ty: FieldType; typeLabel: string; offset: number; size: number }
@@ -118,9 +120,14 @@ export const TYPE_GROUPS: [string, FieldType[]][] = [
   ['Reference', ['Pointer', 'EncryptedPointer', 'ClassInstance', 'Array', 'Enum']],
 ]
 
+/** Byte sizes of fixed-size types; pointer types take the session's pointer size. */
 export const TYPE_SIZE: Partial<Record<FieldType, number>> = {
   Hex64: 8, Hex32: 4, Hex16: 2, Hex8: 1, Int64: 8, Int32: 4, Int16: 2, Int8: 1, UInt64: 8, UInt32: 4, UInt16: 2, UInt8: 1,
   Bool: 1, Float: 4, Double: 8, Vector2: 8, Vector3: 12, Vector4: 16, Text: 32, TextPointer: 8, Pointer: 8, EncryptedPointer: 8, Enum: 4,
+}
+
+export function typeSize(ty: FieldType, pointerSize = 8): number | undefined {
+  return ty === 'Pointer' || ty === 'EncryptedPointer' || ty === 'TextPointer' ? pointerSize : TYPE_SIZE[ty]
 }
 
 export const SHORT: Record<FieldType, string> = {

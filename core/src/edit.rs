@@ -4,6 +4,11 @@
 //! the class where it is: a smaller type is padded with hex fields and a larger
 //! one consumes (and, if needed, splits) the fields after it.
 
+use std::collections::{
+    HashMap,
+    HashSet,
+};
+
 use serde::Deserialize;
 
 use crate::{
@@ -15,6 +20,7 @@ use crate::{
         ClassDefinition,
         EnumDefinition,
         EnumVariant,
+        FieldDefinition,
         FieldType,
         MemoryStructure,
         PointerTarget,
@@ -40,8 +46,9 @@ fn class_mut(ms: &mut MemoryStructure, class_id: u64) -> EditResult<&mut ClassDe
         .ok_or_else(|| format!("no class #{class_id}"))
 }
 
-fn insert_hex(def: &mut ClassDefinition, at: usize, bytes: u64) {
-    for (i, t) in hex_fill(bytes).into_iter().enumerate() {
+/// Inserts hex fields no wider than `word`, the target's pointer size.
+fn insert_hex(def: &mut ClassDefinition, at: usize, bytes: u64, word: u64) {
+    for (i, t) in hex_fill(bytes, word).into_iter().enumerate() {
         def.insert_hex_field_at(at + i, t);
     }
 }
@@ -176,9 +183,10 @@ fn field_sizes(ms: &MemoryStructure, class_id: u64) -> Vec<u64> {
 fn keep_layout(ms: &mut MemoryStructure, class_id: u64, idx: usize, sizes: &[u64]) -> EditResult {
     let new_size = Layout::of(ms).field_size(&ms.class_registry.get(class_id).unwrap().fields[idx]);
     let old_size = sizes[idx];
+    let word = ms.pointer_size;
     let def = class_mut(ms, class_id)?;
     if new_size < old_size {
-        insert_hex(def, idx + 1, old_size - new_size);
+        insert_hex(def, idx + 1, old_size - new_size, word);
     } else if new_size > old_size {
         let mut need = new_size - old_size;
         let mut next = idx + 1;
@@ -187,7 +195,7 @@ fn keep_layout(ms: &mut MemoryStructure, class_id: u64, idx: usize, sizes: &[u64
             def.remove_field_at(idx + 1);
             next += 1;
             if size > need {
-                insert_hex(def, idx + 1, size - need);
+                insert_hex(def, idx + 1, size - need, word);
                 need = 0;
             } else {
                 need -= size;
@@ -212,6 +220,7 @@ pub fn define_at(
         .ok_or_else(|| format!("offset 0x{offset:X} is outside the class"))?;
     let (start, size) = offsets[idx];
     if start != offset {
+        let word = ms.pointer_size;
         let def = class_mut(ms, class_id)?;
         if !def.fields[idx].field_type.is_hex_type() {
             return Err(format!(
@@ -220,8 +229,8 @@ pub fn define_at(
             ));
         }
         def.remove_field_at(idx);
-        insert_hex(def, idx, size - (offset - start));
-        insert_hex(def, idx, offset - start);
+        insert_hex(def, idx, size - (offset - start), word);
+        insert_hex(def, idx, offset - start, word);
     }
     let offsets = Layout::of(ms).field_offsets(class_id);
     let idx = offsets.iter().position(|(o, _)| *o == offset).unwrap();
@@ -265,7 +274,8 @@ pub fn insert_bytes(
             .map(|d| d.fields.len())
             .unwrap_or(0),
     };
-    insert_hex(class_mut(ms, class_id)?, at, count);
+    let word = ms.pointer_size;
+    insert_hex(class_mut(ms, class_id)?, at, count, word);
     Ok(())
 }
 
@@ -384,6 +394,103 @@ fn unique_class_name(ms: &MemoryStructure, base: &str) -> String {
     name
 }
 
+/// Classes in an order where every embedded class (inline or as an array
+/// element) comes before the classes that embed it.
+fn embedding_order(ms: &MemoryStructure) -> Vec<u64> {
+    fn visit(ms: &MemoryStructure, id: u64, seen: &mut HashSet<u64>, out: &mut Vec<u64>) {
+        if !seen.insert(id) {
+            return;
+        }
+        for f in ms
+            .class_registry
+            .get(id)
+            .map(|d| d.fields.as_slice())
+            .unwrap_or(&[])
+        {
+            let embedded = match f.field_type {
+                FieldType::ClassInstance => f.class_id,
+                FieldType::Array => f.array_element.as_ref().and_then(target_embeds),
+                _ => None,
+            };
+            if let Some(child) = embedded {
+                visit(ms, child, seen, out);
+            }
+        }
+        out.push(id);
+    }
+    let mut ids = ms.class_registry.get_class_ids();
+    ids.sort_unstable();
+    let (mut seen, mut out) = (HashSet::new(), Vec::new());
+    for id in ids {
+        visit(ms, id, &mut seen, &mut out);
+    }
+    out
+}
+
+/// Switches the project between 8-byte and 4-byte (32-bit) pointers.
+///
+/// Fields keep their offsets: a pointer that shrinks is padded with hex fields
+/// and one that grows consumes the bytes after it, like `retype_field`. For
+/// 32-bit, hex qwords are split into dwords, since each may hold a pointer.
+pub fn set_pointer_size(ms: &mut MemoryStructure, size: u64) -> EditResult {
+    if size != 4 && size != 8 {
+        return Err(format!("pointer size must be 4 or 8, not {size}"));
+    }
+    if size == ms.pointer_size {
+        return Ok(());
+    }
+    let old: HashMap<u64, Vec<u64>> = ms
+        .class_registry
+        .get_class_ids()
+        .into_iter()
+        .map(|id| (id, field_sizes(ms, id)))
+        .collect();
+    ms.pointer_size = size;
+    // Embedded classes first, so the classes embedding them see their final size.
+    for id in embedding_order(ms) {
+        let lay = Layout::of(ms);
+        let Some(def) = ms.class_registry.get(id) else {
+            continue;
+        };
+        let mut fields = Vec::new();
+        let hex = |bytes| {
+            hex_fill(bytes, size)
+                .into_iter()
+                .map(|t| FieldDefinition::new_hex(t, 0))
+        };
+        // Bytes a grown field still has to take from the fields after it.
+        let mut debt = 0;
+        for (f, &was) in def.fields.iter().zip(&old[&id]) {
+            if debt > 0 {
+                if debt >= was {
+                    debt -= was;
+                } else {
+                    fields.extend(hex(was - debt));
+                    debt = 0;
+                }
+                continue;
+            }
+            if size == 4 && f.field_type == FieldType::Hex64 {
+                fields.extend(hex(8));
+                continue;
+            }
+            let now = lay.field_size(f);
+            fields.push(f.clone());
+            if now < was {
+                fields.extend(hex(was - now));
+            } else {
+                debt = now - was;
+            }
+        }
+        let def = class_mut(ms, id)?;
+        def.fields.clear();
+        for f in fields {
+            def.add_field(f);
+        }
+    }
+    Ok(())
+}
+
 /// New class with 0x40 bytes of hex fields.
 pub fn add_class(ms: &mut MemoryStructure, name: Option<&str>) -> EditResult<u64> {
     let name = unique_class_name(
@@ -393,7 +500,7 @@ pub fn add_class(ms: &mut MemoryStructure, name: Option<&str>) -> EditResult<u64
             .unwrap_or("NewClass"),
     );
     let mut def = ClassDefinition::new(name);
-    for t in hex_fill(0x40) {
+    for t in hex_fill(0x40, ms.pointer_size) {
         def.add_hex_field(t);
     }
     let id = def.id;
@@ -680,6 +787,82 @@ mod tests {
         let f = fid(&ms, cid, 0);
         retype_field(&mut ms, cid, f, FieldType::ClassInstance.into()).unwrap();
         assert!(set_embedded_class(&mut ms, cid, f, cid).is_err());
+    }
+
+    #[test]
+    fn pointer_size_changes_keep_offsets() {
+        let (mut ms, outer) = ms_with(&vec![FieldType::Hex64; 16]);
+        let inner = add_class(&mut ms, Some("Inner")).unwrap();
+        define_at(&mut ms, inner, 0, FieldType::Pointer.into()).unwrap();
+        define_at(&mut ms, inner, 8, FieldType::Int32.into()).unwrap();
+        let spec = |ty, target, length| TypeSpec { ty, target, length };
+        define_at(&mut ms, outer, 0, FieldType::TextPointer.into()).unwrap();
+        define_at(
+            &mut ms,
+            outer,
+            8,
+            spec(
+                FieldType::ClassInstance,
+                Some(PointerTarget::ClassId(inner)),
+                None,
+            ),
+        )
+        .unwrap();
+        let void_ptr = PointerTarget::Pointer(Box::new(PointerTarget::FieldType(FieldType::Hex64)));
+        define_at(
+            &mut ms,
+            outer,
+            0x48,
+            spec(FieldType::Array, Some(void_ptr), Some(2)),
+        )
+        .unwrap();
+        define_at(&mut ms, outer, 0x58, FieldType::Float.into()).unwrap();
+
+        // Named fields by (class, name) -> (offset, size).
+        let named = |ms: &MemoryStructure| {
+            let lay = Layout::of(ms);
+            let mut out = Vec::new();
+            for cid in [outer, inner] {
+                let def = ms.class_registry.get(cid).unwrap();
+                for (f, (o, n)) in def.fields.iter().zip(lay.field_offsets(cid)) {
+                    if let Some(name) = &f.name {
+                        out.push((cid, name.clone(), o, n));
+                    }
+                }
+            }
+            out
+        };
+        let before = named(&ms);
+        let sizes = |ms: &MemoryStructure| {
+            let lay = Layout::of(ms);
+            (lay.class_size(outer), lay.class_size(inner))
+        };
+        assert_eq!(sizes(&ms), (0x80, 0x40));
+
+        set_pointer_size(&mut ms, 4).unwrap();
+        let after = named(&ms);
+        let offsets = |v: &[(u64, String, u64, u64)]| {
+            v.iter()
+                .map(|(c, n, o, _)| (*c, n.clone(), *o))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(offsets(&after), offsets(&before), "fields stay put");
+        let size_of =
+            |v: &[(u64, String, u64, u64)], name: &str| v.iter().find(|f| f.1 == name).unwrap().3;
+        assert_eq!(size_of(&after, "field_00"), 4, "pointers shrink");
+        assert_eq!(size_of(&after, "field_48"), 8, "arrays of pointers shrink");
+        assert_eq!(sizes(&ms), (0x80, 0x40), "classes keep their size");
+        for cid in [outer, inner] {
+            assert!(
+                !types(&ms, cid).contains(&FieldType::Hex64),
+                "hex qwords split"
+            );
+        }
+
+        set_pointer_size(&mut ms, 8).unwrap();
+        assert_eq!(named(&ms), before, "converting back restores the layout");
+        assert_eq!(sizes(&ms), (0x80, 0x40));
+        assert!(set_pointer_size(&mut ms, 2).is_err());
     }
 
     #[test]

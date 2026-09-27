@@ -11,7 +11,6 @@ use reclass_core::{
         Child,
         Decoder,
     },
-    layout::hex_fill,
     memory::{
         FieldDefinition,
         FieldType,
@@ -67,7 +66,10 @@ impl<'a> Inspector<'a> {
 
     /// Rows of `size` bytes at `base` as hex fields, for memory with no class yet.
     pub fn span(&mut self, size: u64, base: u64) -> Vec<Value> {
-        let fields = hex_fill(size)
+        let fields = self
+            .dec
+            .layout
+            .hex_fill(size)
             .into_iter()
             .map(|t| {
                 let mut fd = element_field(&PointerTarget::FieldType(t), 0);

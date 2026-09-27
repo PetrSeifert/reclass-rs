@@ -38,7 +38,7 @@ Addresses (EXPR) are expressions:
   0x7FF6A000 or 1234      hex needs 0x; bare digits are decimal
   <game.exe>              module base
   $GWorld                 signature value (see `reclass sigs`)
-  [EXPR]                  read a u64 at EXPR
+  [EXPR]                  read a pointer at EXPR (4 bytes on 32-bit targets)
   + - ( )                 arithmetic, e.g. \"[<game.exe> + 0x5A1230] + 0x10\"
 
 Classes are named, or #ID. Fields are Class.name, or Class+OFFSET for any field
@@ -209,6 +209,13 @@ instruction; it is not the address of the match.")]
     },
     /// Delete a signature.
     DeleteSig { name: String },
+    /// Show the project's pointer size, or convert it to 4 (32-bit) or 8 bytes.
+    #[command(
+        after_help = "Attaching converts the project to the process's pointer size automatically.
+Converting keeps every other field at its offset: shrinking pointers are padded
+with hex fields and growing pointers consume the bytes after them."
+    )]
+    PointerSize { size: Option<u64> },
     /// Save the project, to PATH or the current project file.
     Save { path: Option<String> },
     /// Send any server method, e.g. `reclass call snapshot`.
@@ -290,7 +297,13 @@ impl App {
                     None => "unsaved new project".into(),
                 };
                 Ok(render::table(&[
-                    vec!["process".into(), process],
+                    vec![
+                        "process".into(),
+                        format!(
+                            "{process}, {}-bit",
+                            session["pointerSize"].as_u64().unwrap_or(8) * 8
+                        ),
+                    ],
                     vec![
                         "root".into(),
                         format!(
@@ -669,6 +682,20 @@ impl App {
                     }
                     _ => format!("${name} saved\n"),
                 })
+            }
+            PointerSize { size } => {
+                if let Some(size) = size {
+                    self.call("setPointerSize", json!({ "size": size }))?;
+                }
+                let session = &self.state()?["session"];
+                if self.json {
+                    return raw(session["pointerSize"].clone());
+                }
+                Ok(format!(
+                    "{}-byte pointers
+",
+                    session["pointerSize"]
+                ))
             }
             DeleteSig { name } => {
                 self.call("removeSignature", json!({ "name": name }))?;

@@ -43,6 +43,9 @@ entering it again. Treat the token as access to the entire shared workspace.
 - `--pid <pid>` attaches on start; `--bind` changes the address, loopback by default.
   Use a TLS reverse proxy for remote access to protect the token and process memory.
   Disable or redact proxy logging of `Sec-WebSocket-Protocol`, which carries the browser's API token.
+- 32-bit (WOW64) processes work too: attaching reads the image's PE header and converts
+  the project to 4-byte pointers, keeping every other field at its offset
+  (`reclass pointer-size` shows or changes it)
 - `--decrypt-module <name>` sets the module holding XenuineDecrypt for encrypted pointers
   (defaults to the process image)
 - The project file is the same `memory_structure.json` the egui app uses; the canvas is

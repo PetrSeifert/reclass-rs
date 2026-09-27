@@ -50,6 +50,42 @@ impl dyn MemorySource + '_ {
         Some(u64::from_le_bytes(buf))
     }
 
+    pub fn read_u32(&self, address: u64) -> Option<u32> {
+        let mut buf = [0u8; 4];
+        self.read(address, &mut buf).ok()?;
+        Some(u32::from_le_bytes(buf))
+    }
+
+    /// Reads a pointer of `size` bytes (4 or 8).
+    pub fn read_pointer(&self, address: u64, size: u64) -> Option<u64> {
+        match size {
+            4 => self.read_u32(address).map(u64::from),
+            _ => self.read_u64(address),
+        }
+    }
+
+    /// Pointer size of the process, from the PE header of its main image:
+    /// 4 for a PE32 (32-bit) image, 8 for PE32+. `None` if it cannot be read.
+    pub fn detect_pointer_size(&self) -> Option<u64> {
+        let image = self.module_by_name(&self.process().name)?;
+        let mut mz = [0u8; 2];
+        self.read(image.base, &mut mz).ok()?;
+        if &mz != b"MZ" {
+            return None;
+        }
+        let nt = image.base + self.read_u32(image.base + 0x3C)? as u64;
+        if self.read_u32(nt)? != u32::from_le_bytes(*b"PE\0\0") {
+            return None;
+        }
+        let mut magic = [0u8; 2];
+        self.read(nt + 0x18, &mut magic).ok()?;
+        match u16::from_le_bytes(magic) {
+            0x10B => Some(4),
+            0x20B => Some(8),
+            _ => None,
+        }
+    }
+
     /// Reads a NUL-terminated string of at most `max` bytes. Non-printable bytes become '.'.
     pub fn read_c_string(&self, address: u64, max: usize) -> Option<String> {
         // Read in chunks so a string near the end of a mapping still resolves.

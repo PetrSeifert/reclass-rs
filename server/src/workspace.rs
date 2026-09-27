@@ -96,6 +96,7 @@ struct EvalCtx<'a> {
     source: &'a dyn MemorySource,
     modules: Vec<ModuleEntry>,
     sigs: &'a HashMap<String, Result<u64, String>>,
+    pointer_size: u64,
 }
 
 impl ExprContext for EvalCtx<'_> {
@@ -113,8 +114,8 @@ impl ExprContext for EvalCtx<'_> {
         }
     }
 
-    fn read_u64(&self, address: u64) -> Option<u64> {
-        self.source.read_u64(address)
+    fn read_pointer(&self, address: u64) -> Option<u64> {
+        self.source.read_pointer(address, self.pointer_size)
     }
 }
 
@@ -124,7 +125,7 @@ fn arg<T: DeserializeOwned>(params: &Value) -> Result<T, String> {
 
 fn blank_project() -> ProjectFile {
     let mut root = ClassDefinition::new("Root".into());
-    for t in reclass_core::layout::hex_fill(0x40) {
+    for t in reclass_core::layout::hex_fill(0x40, 8) {
         root.add_hex_field(t);
     }
     ProjectFile {
@@ -182,6 +183,7 @@ impl Workspace {
             .unwrap_or_default();
         self.resolved.clear();
         self.dirty = false;
+        self.match_target();
         self.rescan();
     }
 
@@ -199,8 +201,31 @@ impl Workspace {
     pub fn attach(&mut self, pid: u32) -> Result<(), String> {
         self.source = Some(self.provider.attach(pid).map_err(|e| e.to_string())?);
         self.resolved.clear();
+        self.match_target();
         self.rescan();
         Ok(())
+    }
+
+    /// Converts the project to the attached process's pointer size, since
+    /// definitions laid out for another size misread every pointer.
+    fn match_target(&mut self) {
+        let Some(size) = self.source.as_ref().and_then(|s| s.detect_pointer_size()) else {
+            return;
+        };
+        if size == self.memory.pointer_size {
+            return;
+        }
+        match edit::set_pointer_size(&mut self.memory, size) {
+            Ok(()) => {
+                log::info!(
+                    "project converted to {}-bit pointers to match the process",
+                    size * 8
+                );
+                self.resolved.clear();
+                self.dirty = true;
+            }
+            Err(e) => log::warn!("cannot convert project to {size}-byte pointers: {e}"),
+        }
     }
 
     fn rescan(&mut self) {
@@ -225,6 +250,7 @@ impl Workspace {
                 source: src,
                 modules: src.modules(),
                 sigs: &self.sig_values,
+                pointer_size: self.memory.pointer_size,
             },
         )
     }
@@ -287,6 +313,7 @@ impl Workspace {
             "projectPath": self.project_path,
             "dirty": self.dirty,
             "demo": self.demo,
+            "pointerSize": self.memory.pointer_size,
         })
     }
 
@@ -364,6 +391,15 @@ impl Workspace {
                 let a: A = arg(p)?;
                 self.attach(a.pid)?;
                 ok(Changed::DEFS)
+            }
+            "setPointerSize" => {
+                let size = p
+                    .get("size")
+                    .and_then(Value::as_u64)
+                    .ok_or("bad params: size")?;
+                let r = edit::set_pointer_size(&mut self.memory, size);
+                self.resolved.clear();
+                edited(self, r)
             }
             "detach" => {
                 self.source = None;
@@ -1135,6 +1171,69 @@ mod tests {
         assert_eq!(cards(&f).len(), 2, "canvas restored");
         assert_eq!(row(&cards(&f)[1], "armor")["value"], "50.0");
         std::fs::remove_file(dir).ok();
+    }
+
+    #[test]
+    fn attaching_a_32_bit_process_converts_the_project() {
+        struct Pe32(Arc<DemoSource>);
+        impl ProcessProvider for Pe32 {
+            fn list_processes(&self) -> anyhow::Result<Vec<reclass_core::source::ProcessEntry>> {
+                Ok(vec![])
+            }
+            fn attach(&self, _: u32) -> anyhow::Result<Arc<dyn MemorySource>> {
+                Ok(self.0.clone())
+            }
+        }
+        let src = Arc::new(DemoSource::new());
+        let image = src.modules()[0].base;
+        src.poke(image, b"MZ");
+        src.poke(image + 0x3C, &0x80u32.to_le_bytes());
+        src.poke(image + 0x80, b"PE\0\0");
+        src.poke(image + 0x98, &0x10Bu16.to_le_bytes());
+        src.poke(0x1F3_A8C4_0100, &0x1122_3344_5566_7788u64.to_le_bytes());
+
+        let offsets = |ws: &Workspace| -> Vec<(String, String, u64)> {
+            let defs = ws.defs();
+            let mut out = Vec::new();
+            for c in defs["classes"].as_array().unwrap() {
+                for f in c["fields"].as_array().unwrap() {
+                    if let Some(name) = f["name"].as_str() {
+                        let class = c["name"].as_str().unwrap().to_string();
+                        out.push((class, name.to_string(), f["offset"].as_u64().unwrap()));
+                    }
+                }
+            }
+            out
+        };
+        let (memory, signatures) = demo_project();
+        let project = ProjectFile {
+            memory,
+            signatures,
+            web: None,
+        };
+        let mut ws = Workspace::new(Arc::new(Pe32(src)), Some(project), None, true);
+        let before = offsets(&ws);
+        assert_eq!(ws.session()["pointerSize"], 8);
+
+        ws.attach(DEMO_PID).unwrap();
+        let session = ws.session();
+        assert_eq!(session["pointerSize"], 4);
+        assert_eq!(session["dirty"], true);
+        assert_eq!(offsets(&ws), before, "named fields keep their offsets");
+        assert_eq!(
+            call(&mut ws, "eval", json!({ "expr": "[0x1F3A8C40100]" })),
+            "55667788",
+            "derefs read 4 bytes"
+        );
+
+        call(&mut ws, "setPointerSize", json!({ "size": 8 }));
+        assert_eq!(ws.session()["pointerSize"], 8);
+        assert_eq!(offsets(&ws), before);
+        assert_eq!(
+            call(&mut ws, "eval", json!({ "expr": "[0x1F3A8C40100]" })),
+            "1122334455667788"
+        );
+        assert!(ws.handle("setPointerSize", &json!({ "size": 3 })).is_err());
     }
 
     #[test]

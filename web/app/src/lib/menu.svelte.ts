@@ -2,7 +2,7 @@
 
 import { focusCard } from './geometry.svelte'
 import { app, call, copy, toast } from './store.svelte'
-import { TYPE_GROUPS, TYPE_SIZE, type CardView, type FieldType, type PointerTarget, type Row } from './types'
+import { TYPE_GROUPS, typeSize, type CardView, type FieldType, type PointerTarget, type Row } from './types'
 
 export interface MenuItem {
   label?: string
@@ -97,7 +97,7 @@ export function fieldMenu(card: CardView, row: Row): MenuItem[] {
         label: group,
         submenu: types.map((ty) => ({
           label: ty,
-          hint: TYPE_SIZE[ty] ? `${TYPE_SIZE[ty]}B` : '',
+          hint: typeSize(ty, app.session?.pointerSize) ? `${typeSize(ty, app.session?.pointerSize)}B` : '',
           checked: row.ty === ty,
           onClick: () => call('retype', { ...ref, ty }),
         })),

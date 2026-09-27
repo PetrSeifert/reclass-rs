@@ -6,13 +6,15 @@
 //! factor := '(' expr ')' | '[' expr ']' | '<' module '>' | '$' ident | number
 //! number := '0x' hex+ | digit+
 //! ```
-//! `[x]` reads a u64 at address `x`. Arithmetic wraps.
+//! `[x]` reads a pointer (8 bytes, or 4 on 32-bit targets) at address `x`.
+//! Arithmetic wraps.
 
 /// Everything an expression can refer to.
 pub trait ExprContext {
     fn module_base(&self, name: &str) -> Option<u64>;
     fn signature(&self, name: &str) -> Result<u64, String>;
-    fn read_u64(&self, address: u64) -> Option<u64>;
+    /// Reads a pointer-sized value.
+    fn read_pointer(&self, address: u64) -> Option<u64>;
 }
 
 pub fn eval(input: &str, ctx: &dyn ExprContext) -> Result<u64, String> {
@@ -93,7 +95,7 @@ impl Parser<'_> {
             self.expect(b']')?;
             return self
                 .ctx
-                .read_u64(addr)
+                .read_pointer(addr)
                 .ok_or_else(|| format!("cannot read 0x{addr:X}"));
         }
         if self.eat(b'<') {
@@ -172,7 +174,7 @@ mod tests {
                 _ => Err("pattern not found".into()),
             }
         }
-        fn read_u64(&self, address: u64) -> Option<u64> {
+        fn read_pointer(&self, address: u64) -> Option<u64> {
             (address == 0x2000).then_some(0xABCD)
         }
     }

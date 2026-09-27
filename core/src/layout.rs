@@ -19,6 +19,8 @@ const MAX_DEPTH: u32 = 16;
 pub struct Layout<'a> {
     pub classes: &'a ClassDefinitionRegistry,
     pub enums: &'a EnumDefinitionRegistry,
+    /// Size of pointers in the target process, 8 or 4.
+    pub pointer_size: u64,
 }
 
 impl<'a> Layout<'a> {
@@ -26,7 +28,23 @@ impl<'a> Layout<'a> {
         Self {
             classes: &ms.class_registry,
             enums: &ms.enum_registry,
+            pointer_size: ms.pointer_size,
         }
+    }
+
+    /// Size of a fixed-size type; pointers take the target's pointer size.
+    pub fn type_size(&self, t: &FieldType) -> u64 {
+        match t {
+            FieldType::Pointer | FieldType::EncryptedPointer | FieldType::TextPointer => {
+                self.pointer_size
+            }
+            t => t.get_size(),
+        }
+    }
+
+    /// Hex fields covering `bytes`, no wider than a pointer.
+    pub fn hex_fill(&self, bytes: u64) -> Vec<FieldType> {
+        hex_fill(bytes, self.pointer_size)
     }
 
     pub fn enum_size(&self, fd: &FieldDefinition) -> u64 {
@@ -56,7 +74,7 @@ impl<'a> Layout<'a> {
                     .saturating_mul(fd.array_length.unwrap_or(0) as u64),
                 None => 0,
             },
-            ref t => t.get_size(),
+            ref t => self.type_size(t),
         }
     }
 
@@ -67,7 +85,7 @@ impl<'a> Layout<'a> {
 
     fn target_size_at(&self, target: &PointerTarget, depth: u32) -> u64 {
         match target {
-            PointerTarget::FieldType(t) => t.get_size(),
+            PointerTarget::FieldType(t) => self.type_size(t),
             PointerTarget::EnumId(id) => self
                 .enums
                 .get(*id)
@@ -77,7 +95,7 @@ impl<'a> Layout<'a> {
             PointerTarget::Array { element, length } => self
                 .target_size_at(element, depth + 1)
                 .saturating_mul(*length as u64),
-            PointerTarget::Pointer(_) => 8,
+            PointerTarget::Pointer(_) => self.pointer_size,
         }
     }
 
@@ -113,8 +131,9 @@ impl<'a> Layout<'a> {
     }
 }
 
-/// Hex fields covering exactly `bytes` bytes, largest first.
-pub fn hex_fill(mut bytes: u64) -> Vec<FieldType> {
+/// Hex fields covering exactly `bytes` bytes, largest first and none wider than
+/// `word` bytes, so a 32-bit target gets dword-sized (pointer-sized) fields.
+pub fn hex_fill(mut bytes: u64, word: u64) -> Vec<FieldType> {
     let mut out = Vec::new();
     for (t, s) in [
         (FieldType::Hex64, 8),
@@ -122,6 +141,9 @@ pub fn hex_fill(mut bytes: u64) -> Vec<FieldType> {
         (FieldType::Hex16, 2),
         (FieldType::Hex8, 1),
     ] {
+        if s > word {
+            continue;
+        }
         while bytes >= s {
             out.push(t.clone());
             bytes -= s;

@@ -571,7 +571,7 @@ pub fn demo_project() -> (MemoryStructure, Vec<SignatureDef>) {
             PointerTarget::ClassId(weapon.id),
         ),
     ];
-    player_fields.extend(hex_fill(0x28).into_iter().map(hex));
+    player_fields.extend(hex_fill(0x28, 8).into_iter().map(hex));
     let player = class("Player", player_fields);
     let camera = class(
         "Camera",
@@ -642,7 +642,7 @@ pub fn demo_project() -> (MemoryStructure, Vec<SignatureDef>) {
         camera,
         class(
             "UnknownClass",
-            hex_fill(0x20).into_iter().map(hex).collect(),
+            hex_fill(0x20, 8).into_iter().map(hex).collect(),
         ),
     ] {
         ms.class_registry.register(c);

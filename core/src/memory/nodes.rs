@@ -109,6 +109,13 @@ pub struct MemoryStructure {
     pub class_registry: ClassDefinitionRegistry,
     #[serde(default)]
     pub enum_registry: EnumDefinitionRegistry,
+    /// Pointer size of the target process: 8, or 4 for 32-bit processes.
+    #[serde(default = "default_pointer_size")]
+    pub pointer_size: u64,
+}
+
+fn default_pointer_size() -> u64 {
+    8
 }
 
 impl MemoryStructure {
@@ -168,6 +175,7 @@ impl MemoryStructure {
             root_class,
             class_registry,
             enum_registry: EnumDefinitionRegistry::new(),
+            pointer_size: default_pointer_size(),
         }
     }
 
@@ -193,6 +201,7 @@ impl MemoryStructure {
 
         // After registry is updated with the renamed definition, recalculate layout
         Self::recalc_instance_layout(
+            self.pointer_size,
             &self.enum_registry,
             &self.class_registry,
             &mut self.root_class,
@@ -223,6 +232,7 @@ impl MemoryStructure {
 
         // Rebuild layout to reflect any size/name changes
         Self::recalc_instance_layout(
+            self.pointer_size,
             &self.enum_registry,
             &self.class_registry,
             &mut self.root_class,
@@ -268,8 +278,9 @@ impl MemoryStructure {
 
     pub fn create_nested_instances(&mut self) {
         let registry = self.class_registry.clone();
-        Self::build_nested_for_instance(&registry, &mut self.root_class);
+        Self::build_nested_for_instance(self.pointer_size, &registry, &mut self.root_class);
         Self::recalc_instance_layout(
+            self.pointer_size,
             &self.enum_registry,
             &self.class_registry,
             &mut self.root_class,
@@ -278,8 +289,13 @@ impl MemoryStructure {
 
     pub fn bind_nested_for_instance(&self, instance: &mut ClassInstance) {
         let registry = self.class_registry.clone();
-        Self::build_nested_for_instance(&registry, instance);
-        Self::recalc_instance_layout(&self.enum_registry, &self.class_registry, instance);
+        Self::build_nested_for_instance(self.pointer_size, &registry, instance);
+        Self::recalc_instance_layout(
+            self.pointer_size,
+            &self.enum_registry,
+            &self.class_registry,
+            instance,
+        );
     }
 
     pub fn rebuild_root_from_registry(&mut self) {
@@ -289,8 +305,9 @@ impl MemoryStructure {
             let address = self.root_class.address;
             self.root_class = ClassInstance::new(name, address, def);
             let registry = self.class_registry.clone();
-            Self::build_nested_for_instance(&registry, &mut self.root_class);
+            Self::build_nested_for_instance(self.pointer_size, &registry, &mut self.root_class);
             Self::recalc_instance_layout(
+                self.pointer_size,
                 &self.enum_registry,
                 &self.class_registry,
                 &mut self.root_class,
@@ -298,7 +315,11 @@ impl MemoryStructure {
         }
     }
 
-    fn build_nested_for_instance(registry: &ClassDefinitionRegistry, instance: &mut ClassInstance) {
+    fn build_nested_for_instance(
+        pointer_size: u64,
+        registry: &ClassDefinitionRegistry,
+        instance: &mut ClassInstance,
+    ) {
         for field in &mut instance.fields {
             let field_def_opt = registry
                 .get_by_id(instance.class_id)
@@ -319,9 +340,14 @@ impl MemoryStructure {
                             field.address,
                             class_def.clone(),
                         );
-                        Self::build_nested_for_instance(registry, &mut nested_instance);
+                        Self::build_nested_for_instance(
+                            pointer_size,
+                            registry,
+                            &mut nested_instance,
+                        );
                         // Use default enum registry for nested; caller will re-run with real registry on rebuild
                         Self::recalc_instance_layout(
+                            pointer_size,
                             &EnumDefinitionRegistry::new(),
                             registry,
                             &mut nested_instance,
@@ -335,10 +361,16 @@ impl MemoryStructure {
                 }
             }
         }
-        Self::recalc_instance_layout(&EnumDefinitionRegistry::new(), registry, instance);
+        Self::recalc_instance_layout(
+            pointer_size,
+            &EnumDefinitionRegistry::new(),
+            registry,
+            instance,
+        );
     }
 
     fn recalc_instance_layout(
+        pointer_size: u64,
         enum_registry: &EnumDefinitionRegistry,
         class_registry: &ClassDefinitionRegistry,
         instance: &mut ClassInstance,
@@ -346,6 +378,7 @@ impl MemoryStructure {
         let layout = Layout {
             classes: class_registry,
             enums: enum_registry,
+            pointer_size,
         };
         let mut current_offset: u64 = 0;
         for field in &mut instance.fields {
@@ -357,7 +390,12 @@ impl MemoryStructure {
                 if fd.field_type == FieldType::ClassInstance {
                     if let Some(ref mut nested) = field.nested_instance {
                         nested.address = field.address;
-                        Self::recalc_instance_layout(enum_registry, class_registry, nested);
+                        Self::recalc_instance_layout(
+                            pointer_size,
+                            enum_registry,
+                            class_registry,
+                            nested,
+                        );
                     }
                 }
                 current_offset = current_offset.saturating_add(layout.field_size(fd));
@@ -370,6 +408,7 @@ impl MemoryStructure {
     pub fn set_root_address(&mut self, new_address: u64) {
         self.root_class.address = new_address;
         Self::recalc_instance_layout(
+            self.pointer_size,
             &self.enum_registry,
             &self.class_registry,
             &mut self.root_class,
@@ -383,8 +422,9 @@ impl MemoryStructure {
             let address = self.root_class.address;
             self.root_class = ClassInstance::new(name, address, def);
             let registry = self.class_registry.clone();
-            Self::build_nested_for_instance(&registry, &mut self.root_class);
+            Self::build_nested_for_instance(self.pointer_size, &registry, &mut self.root_class);
             Self::recalc_instance_layout(
+                self.pointer_size,
                 &self.enum_registry,
                 &self.class_registry,
                 &mut self.root_class,
