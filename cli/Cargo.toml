@@ -1,0 +1,16 @@
+[package]
+name = "reclass-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "reclass"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+
+clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
+ureq = { version = "3", default-features = false, features = ["json"] }

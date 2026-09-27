@@ -5,6 +5,7 @@
 
 mod access;
 mod canvas;
+mod inspect;
 mod workspace;
 
 use std::{

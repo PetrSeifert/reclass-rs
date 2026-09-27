@@ -52,6 +52,26 @@ For UI development run the server with `--demo --allowed-origin http://localhost
 and `npm run dev` in `web/app`. Vite proxies `/ws` and `/api` to the server.
 Use the exact origin shown by Vite if its hostname or port differs.
 
+#### Command line
+
+`reclass` drives a running server from a terminal, a script or a coding agent.
+Its edits show up live in the browser.
+
+```sh
+cargo install --path cli        # or: cargo run -p reclass-cli -- <command>
+export RECLASS_API_TOKEN=...    # the token the server printed
+reclass status                  # attached process, root address, project
+reclass view                    # the root class, decoded live
+reclass view 0x1F3A8D12600 -s 0x100          # raw qwords with pointer/float hints
+reclass define Player 0x1C f32 health        # type and name the bytes at an offset
+reclass view '[$GWorld]+0x28' -c Player -f 1  # follow class pointers one level
+```
+
+`reclass --help` documents address expressions, field references
+(`Player.health`, `Player+0x1C`) and the type syntax (`Player*`, `f32[4]`,
+`enc Camera*`, …). Add `--json` to any command for the server's raw reply.
+`RECLASS_URL` selects a server other than `http://127.0.0.1:7878`.
+
 #### API
 
 Every client drives the same workspace, and every change is pushed to all open

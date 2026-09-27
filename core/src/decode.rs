@@ -94,6 +94,18 @@ pub fn fmt_float(v: f64) -> String {
     }
 }
 
+/// Whether a 32-bit pattern looks like a float someone stored on purpose:
+/// zero, or a finite magnitude well clear of denormals and huge exponents.
+fn plausible_f32(bits: u32) -> Option<f64> {
+    let f = f32::from_bits(bits) as f64;
+    (bits == 0 || (1e-4..1e7).contains(&f.abs())).then_some(f)
+}
+
+/// Both halves of a qword as floats, e.g. an (x, y) pair, when both look intended.
+fn float_pair(n: u64) -> Option<(f64, f64)> {
+    Some((plausible_f32(n as u32)?, plausible_f32((n >> 32) as u32)?))
+}
+
 fn ascii(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -241,6 +253,9 @@ impl<'a> Decoder<'a> {
                 8 => {
                     if let Some(sym) = self.symbolize(n) {
                         d.hints.push(format!("-> {sym}"));
+                    } else if let Some((lo, hi)) = float_pair(n) {
+                        d.hints
+                            .push(format!("f32 {}, {}", fmt_float(lo), fmt_float(hi)));
                     } else if n < 0x1_0000_0000 {
                         d.hints.push(format!("int {n}"));
                     } else if self.readable(n) {
@@ -530,6 +545,19 @@ mod tests {
             );
             assert_eq!(&decoded.value, expected);
             assert_eq!(decoded.error, None);
+        }
+    }
+
+    #[test]
+    fn qwords_holding_two_floats_are_hinted() {
+        assert_eq!(float_pair(0x4280_0000_42F0_0000), Some((120.0, 64.0)));
+        assert_eq!(float_pair(0x0000_0000_4148_0000), Some((12.5, 0.0)));
+        for not_floats in [
+            0x0000_7FF6_A2B9_1A08,
+            0x0000_0006_0000_000E,
+            0x0000_0000_0000_0064,
+        ] {
+            assert_eq!(float_pair(not_floats), None, "{not_floats:X}");
         }
     }
 

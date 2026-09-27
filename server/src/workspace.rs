@@ -13,7 +13,10 @@ use reclass_core::{
         type_label,
         Decoder,
     },
-    edit,
+    edit::{
+        self,
+        TypeSpec,
+    },
     expr::{
         self,
         ExprContext,
@@ -21,7 +24,6 @@ use reclass_core::{
     layout::Layout,
     memory::{
         ClassDefinition,
-        FieldType,
         MemoryStructure,
         PointerTarget,
     },
@@ -42,11 +44,14 @@ use serde_json::{
     Value,
 };
 
-use crate::canvas::{
-    hex,
-    Canvas,
-    Resolved,
-    ROOT,
+use crate::{
+    canvas::{
+        hex,
+        Canvas,
+        Resolved,
+        ROOT,
+    },
+    inspect::Inspector,
 };
 
 /// What changed as a result of a command, so the caller knows what to broadcast.
@@ -432,6 +437,57 @@ impl Workspace {
                     Changed::NONE,
                 ))
             }
+            "inspect" => {
+                // Decodes an instance without opening cards. With no address it
+                // shows the root; with `size` instead of a class, raw hex fields.
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct A {
+                    address: Option<String>,
+                    class_id: Option<u64>,
+                    size: Option<u64>,
+                    #[serde(default)]
+                    follow: u32,
+                    elements: Option<u32>,
+                }
+                let a: A = arg(p)?;
+                let src = self.source.clone().ok_or("not attached")?;
+                let base = match &a.address {
+                    Some(e) => self.eval(e)?,
+                    None => self.root_address()?,
+                };
+                let dec = Decoder::new(&*src, Layout::of(&self.memory));
+                let mut inspector = Inspector::new(&dec, a.elements.unwrap_or(16).min(4096));
+                let mut result = match (a.size, a.class_id, &a.address) {
+                    (Some(size), None, _) => {
+                        json!({ "size": size.min(0x10000), "rows": inspector.span(size.min(0x10000), base) })
+                    }
+                    (None, class_id, address) => {
+                        let class_id = match (class_id, address) {
+                            (Some(id), _) => id,
+                            (None, None) => self.root_class(),
+                            (None, Some(_)) => return Err("pass classId or size".into()),
+                        };
+                        let class = self
+                            .memory
+                            .class_registry
+                            .get(class_id)
+                            .ok_or_else(|| format!("no class #{class_id}"))?;
+                        json!({
+                            "classId": class_id,
+                            "className": class.name,
+                            "size": dec.layout.class_size(class_id),
+                            "rows": inspector.class(class_id, base, a.follow.min(8)),
+                        })
+                    }
+                    (Some(_), Some(_), _) => return Err("pass either classId or size".into()),
+                };
+                result["address"] = json!(hex(base));
+                if inspector.truncated() {
+                    result["truncated"] = json!(true);
+                }
+                Ok((result, Changed::NONE))
+            }
             "snapshot" => Ok((self.frame(), Changed::NONE)),
             "state" => Ok((
                 json!({ "session": self.session(), "defs": self.defs() }),
@@ -444,10 +500,11 @@ impl Workspace {
                 struct A {
                     class_id: u64,
                     field_id: u64,
-                    ty: FieldType,
+                    #[serde(flatten)]
+                    spec: TypeSpec,
                 }
                 let a: A = arg(p)?;
-                let r = edit::retype_field(&mut self.memory, a.class_id, a.field_id, a.ty);
+                let r = edit::retype_field(&mut self.memory, a.class_id, a.field_id, a.spec);
                 edited(self, r)
             }
             "defineAt" => {
@@ -456,11 +513,13 @@ impl Workspace {
                 struct A {
                     class_id: u64,
                     offset: u64,
-                    ty: FieldType,
+                    #[serde(flatten)]
+                    spec: TypeSpec,
                 }
                 let a: A = arg(p)?;
-                let r = edit::define_at(&mut self.memory, a.class_id, a.offset, a.ty).map(|_| ());
-                edited(self, r)
+                let field_id = edit::define_at(&mut self.memory, a.class_id, a.offset, a.spec)?;
+                self.dirty = true;
+                Ok((json!(field_id), Changed::DEFS))
             }
             "renameField" => {
                 #[derive(Deserialize)]
@@ -1076,6 +1135,80 @@ mod tests {
         assert_eq!(cards(&f).len(), 2, "canvas restored");
         assert_eq!(row(&cards(&f)[1], "armor")["value"], "50.0");
         std::fs::remove_file(dir).ok();
+    }
+
+    #[test]
+    fn inspect_decodes_without_touching_the_canvas() {
+        let mut ws = demo();
+        let canvas = serde_json::to_value(&ws.canvas).unwrap();
+        let root = call(&mut ws, "inspect", json!({}));
+        assert_eq!(root["className"], "GameWorld");
+        assert_eq!(root["address"], "1F3A8C40000");
+        let rows = root["rows"].as_array().unwrap();
+        let named = |rows: &[Value], name: &str| {
+            rows.iter()
+                .find(|r| r["name"] == name)
+                .unwrap_or_else(|| panic!("no row {name}"))
+                .clone()
+        };
+        assert_eq!(named(rows, "mapName")["value"], "\"de_hollow_ridge\"");
+        assert!(named(rows, "localPlayer").get("children").is_none());
+
+        let followed = call(&mut ws, "inspect", json!({ "follow": 1 }));
+        let player = named(followed["rows"].as_array().unwrap(), "localPlayer");
+        let fields = player["children"].as_array().expect("pointer followed");
+        assert!(fields.iter().all(|r| r["classId"].is_u64()));
+
+        let player_class = fields[0]["classId"].clone();
+        let at = format!("0x{}", player["value"].as_str().unwrap());
+        let direct = call(
+            &mut ws,
+            "inspect",
+            json!({ "address": at, "classId": player_class }),
+        );
+        assert_eq!(direct["rows"], json!(fields), "same instance, same rows");
+
+        let span = call(
+            &mut ws,
+            "inspect",
+            json!({ "address": "[$GWorld]", "size": 0x14 }),
+        );
+        let types: Vec<&str> = span["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(types, ["Hex64", "Hex64", "Hex32"]);
+        assert!(ws.handle("inspect", &json!({ "address": "0" })).is_err());
+        assert_eq!(serde_json::to_value(&ws.canvas).unwrap(), canvas);
+    }
+
+    #[test]
+    fn define_at_takes_a_target_and_returns_the_field() {
+        let mut ws = demo();
+        let class = call(&mut ws, "addClass", json!({ "name": "Probe" }));
+        let target = call(&mut ws, "addClass", json!({ "name": "Target" }));
+        let field = call(
+            &mut ws,
+            "defineAt",
+            json!({ "classId": class, "offset": 8, "ty": "Pointer", "target": { "ClassId": target } }),
+        );
+        let defs = ws.defs();
+        let probe = defs["classes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == class)
+            .unwrap();
+        let f = probe["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["id"] == field)
+            .unwrap();
+        assert_eq!(f["offset"], 8);
+        assert_eq!(f["typeLabel"], "Target*");
     }
 
     #[test]

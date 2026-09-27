@@ -4,6 +4,8 @@
 //! the class where it is: a smaller type is padded with hex fields and a larger
 //! one consumes (and, if needed, splits) the fields after it.
 
+use serde::Deserialize;
+
 use crate::{
     layout::{
         hex_fill,
@@ -44,13 +46,71 @@ fn insert_hex(def: &mut ClassDefinition, at: usize, bytes: u64) {
     }
 }
 
+/// A field type plus what it refers to, so a field can be retyped in one edit.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeSpec {
+    pub ty: FieldType,
+    /// Pointee of a pointer, class of an embedded instance, enum of an enum
+    /// field or element of an array. Other types take none.
+    #[serde(default)]
+    pub target: Option<PointerTarget>,
+    /// Element count of an array.
+    #[serde(default)]
+    pub length: Option<u32>,
+}
+
+impl From<FieldType> for TypeSpec {
+    fn from(ty: FieldType) -> Self {
+        Self {
+            ty,
+            target: None,
+            length: None,
+        }
+    }
+}
+
+/// Rejects a target or length that `spec.ty` cannot take, before anything is changed.
+fn check_spec(ms: &MemoryStructure, class_id: u64, spec: &TypeSpec) -> EditResult {
+    if spec.length.is_some() && spec.ty != FieldType::Array {
+        return Err(format!("{} has no length", spec.ty));
+    }
+    let Some(target) = &spec.target else {
+        return Ok(());
+    };
+    match (&spec.ty, target) {
+        (FieldType::Pointer | FieldType::EncryptedPointer, _) => Ok(()),
+        (FieldType::ClassInstance, PointerTarget::ClassId(cid)) => {
+            if ms.class_registry.get(*cid).is_none() {
+                return Err(format!("no class #{cid}"));
+            }
+            if ms.would_create_cycle(class_id, *cid) {
+                return Err("embedding that class would create a cycle".into());
+            }
+            Ok(())
+        }
+        (FieldType::Enum, PointerTarget::EnumId(eid)) => match ms.enum_registry.contains(*eid) {
+            true => Ok(()),
+            false => Err(format!("no enum #{eid}")),
+        },
+        (FieldType::Array, element) => match target_embeds(element) {
+            Some(cid) if ms.would_create_cycle(class_id, cid) => {
+                Err("an inline array of that class would create a cycle".into())
+            }
+            _ => Ok(()),
+        },
+        (ty, _) => Err(format!("{ty} cannot take that target")),
+    }
+}
+
 pub fn retype_field(
     ms: &mut MemoryStructure,
     class_id: u64,
     field_id: u64,
-    ty: FieldType,
+    spec: TypeSpec,
 ) -> EditResult {
     let idx = field_index(ms, class_id, field_id)?;
+    check_spec(ms, class_id, &spec)?;
     let sizes = field_sizes(ms, class_id);
     let offset = Layout::of(ms).field_offsets(class_id)[idx].0;
     // Prefer an enum that fits the field's current size, so the layout doesn't shift.
@@ -67,21 +127,36 @@ pub fn retype_field(
     {
         let def = class_mut(ms, class_id)?;
         let was_unnamed = def.fields[idx].name.is_none();
-        def.set_field_type_at(idx, ty.clone());
+        def.set_field_type_at(idx, spec.ty.clone());
         let fd = &mut def.fields[idx];
-        if was_unnamed && !ty.is_hex_type() {
+        if was_unnamed && !spec.ty.is_hex_type() {
             // Name by offset rather than index, so names stay put when fields are inserted.
             fd.name = Some(format!("field_{offset:02X}"));
         }
-        match ty {
-            FieldType::Pointer | FieldType::EncryptedPointer if fd.pointer_target.is_none() => {
+        match (spec.ty, spec.target) {
+            (FieldType::Pointer | FieldType::EncryptedPointer, Some(t)) => {
+                fd.pointer_target = Some(t)
+            }
+            (FieldType::Pointer | FieldType::EncryptedPointer, None)
+                if fd.pointer_target.is_none() =>
+            {
                 fd.pointer_target = Some(PointerTarget::FieldType(FieldType::Hex64));
             }
-            FieldType::Enum => {
-                fd.enum_id = fd.enum_id.or(first_enum);
+            (FieldType::ClassInstance, Some(PointerTarget::ClassId(cid))) => {
+                fd.class_id = Some(cid)
+            }
+            (FieldType::Enum, target) => {
+                fd.enum_id = match target {
+                    Some(PointerTarget::EnumId(eid)) => Some(eid),
+                    _ => fd.enum_id.or(first_enum),
+                };
                 fd.enum_size = None;
             }
+            (FieldType::Array, Some(t)) => fd.array_element = Some(t),
             _ => {}
+        }
+        if let Some(n) = spec.length {
+            fd.array_length = Some(n.clamp(1, 4096));
         }
     }
     keep_layout(ms, class_id, idx, &sizes)
@@ -127,8 +202,9 @@ pub fn define_at(
     ms: &mut MemoryStructure,
     class_id: u64,
     offset: u64,
-    ty: FieldType,
+    spec: TypeSpec,
 ) -> EditResult<u64> {
+    check_spec(ms, class_id, &spec)?;
     let offsets = Layout::of(ms).field_offsets(class_id);
     let idx = offsets
         .iter()
@@ -150,7 +226,7 @@ pub fn define_at(
     let offsets = Layout::of(ms).field_offsets(class_id);
     let idx = offsets.iter().position(|(o, _)| *o == offset).unwrap();
     let field_id = ms.class_registry.get(class_id).unwrap().fields[idx].id;
-    retype_field(ms, class_id, field_id, ty)?;
+    retype_field(ms, class_id, field_id, spec)?;
     Ok(field_id)
 }
 
@@ -521,7 +597,7 @@ mod tests {
         let (mut ms, cid) = ms_with(&[FieldType::Hex64, FieldType::Hex64]);
         let f0 = fid(&ms, cid, 0);
 
-        retype_field(&mut ms, cid, f0, FieldType::Float).unwrap();
+        retype_field(&mut ms, cid, f0, FieldType::Float.into()).unwrap();
         assert_eq!(
             types(&ms, cid),
             vec![FieldType::Float, FieldType::Hex32, FieldType::Hex64]
@@ -534,12 +610,12 @@ mod tests {
         let (mut ms, cid) = ms_with(&[FieldType::Hex32, FieldType::Hex64, FieldType::Hex64]);
         let f0 = fid(&ms, cid, 0);
 
-        retype_field(&mut ms, cid, f0, FieldType::Vector3).unwrap();
+        retype_field(&mut ms, cid, f0, FieldType::Vector3.into()).unwrap();
         assert_eq!(types(&ms, cid), vec![FieldType::Vector3, FieldType::Hex64]);
         let (mut ms, cid) = ms_with(&[FieldType::Hex32, FieldType::Hex64]);
         let f0 = fid(&ms, cid, 0);
 
-        retype_field(&mut ms, cid, f0, FieldType::Hex64).unwrap();
+        retype_field(&mut ms, cid, f0, FieldType::Hex64.into()).unwrap();
         assert_eq!(types(&ms, cid), vec![FieldType::Hex64, FieldType::Hex32]);
     }
 
@@ -548,7 +624,7 @@ mod tests {
         let (mut ms, cid) = ms_with(&[FieldType::Hex64]);
         let f0 = fid(&ms, cid, 0);
 
-        retype_field(&mut ms, cid, f0, FieldType::Pointer).unwrap();
+        retype_field(&mut ms, cid, f0, FieldType::Pointer.into()).unwrap();
         let fd = &ms.class_registry.get(cid).unwrap().fields[0];
         assert_eq!(
             fd.pointer_target,
@@ -560,12 +636,12 @@ mod tests {
     #[test]
     fn define_at_splits_covering_hex_field() {
         let (mut ms, cid) = ms_with(&[FieldType::Hex64, FieldType::Hex64]);
-        define_at(&mut ms, cid, 4, FieldType::Float).unwrap();
+        define_at(&mut ms, cid, 4, FieldType::Float.into()).unwrap();
         assert_eq!(
             types(&ms, cid),
             vec![FieldType::Hex32, FieldType::Float, FieldType::Hex64]
         );
-        assert!(define_at(&mut ms, cid, 6, FieldType::Int16).is_err());
+        assert!(define_at(&mut ms, cid, 6, FieldType::Int16.into()).is_err());
     }
 
     #[test]
@@ -588,7 +664,7 @@ mod tests {
         assert_eq!(class_refs(&ms, other), 0);
         let f0 = fid(&ms, cid, 0);
 
-        retype_field(&mut ms, cid, f0, FieldType::Pointer).unwrap();
+        retype_field(&mut ms, cid, f0, FieldType::Pointer.into()).unwrap();
         let f0 = fid(&ms, cid, 0);
 
         set_pointer_target(&mut ms, cid, f0, PointerTarget::ClassId(other)).unwrap();
@@ -602,8 +678,66 @@ mod tests {
     fn embedding_self_is_rejected() {
         let (mut ms, cid) = ms_with(&[FieldType::Hex64]);
         let f = fid(&ms, cid, 0);
-        retype_field(&mut ms, cid, f, FieldType::ClassInstance).unwrap();
+        retype_field(&mut ms, cid, f, FieldType::ClassInstance.into()).unwrap();
         assert!(set_embedded_class(&mut ms, cid, f, cid).is_err());
+    }
+
+    #[test]
+    fn retype_with_target_keeps_the_layout() {
+        let (mut ms, cid) = ms_with(&vec![FieldType::Hex64; 4]);
+        let (inner, _) = ms_with(&vec![FieldType::Hex64; 2]);
+        let vec = inner.root_class.class_id;
+        ms.class_registry
+            .register(inner.class_registry.get(vec).unwrap().clone());
+        let embed = |ty, target, length| TypeSpec { ty, target, length };
+
+        let f = define_at(
+            &mut ms,
+            cid,
+            8,
+            embed(
+                FieldType::ClassInstance,
+                Some(PointerTarget::ClassId(vec)),
+                None,
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            types(&ms, cid),
+            vec![FieldType::Hex64, FieldType::ClassInstance, FieldType::Hex64]
+        );
+        assert_eq!(Layout::of(&ms).class_size(cid), 32);
+
+        let element = PointerTarget::FieldType(FieldType::Float);
+        retype_field(
+            &mut ms,
+            cid,
+            f,
+            embed(FieldType::Array, Some(element), Some(6)),
+        )
+        .unwrap();
+        assert_eq!(types(&ms, cid), vec![FieldType::Hex64, FieldType::Array]);
+        assert_eq!(Layout::of(&ms).class_size(cid), 32);
+
+        let before = types(&ms, cid);
+        let bad = [
+            embed(FieldType::Float, Some(PointerTarget::ClassId(vec)), None),
+            embed(FieldType::Float, None, Some(2)),
+            embed(
+                FieldType::ClassInstance,
+                Some(PointerTarget::ClassId(cid)),
+                None,
+            ),
+            embed(FieldType::Enum, Some(PointerTarget::EnumId(999)), None),
+        ];
+        for spec in bad {
+            assert!(
+                retype_field(&mut ms, cid, f, spec.clone()).is_err(),
+                "{spec:?}"
+            );
+            assert!(define_at(&mut ms, cid, 4, spec).is_err());
+        }
+        assert_eq!(types(&ms, cid), before, "rejected edits change nothing");
     }
 
     #[test]
@@ -636,7 +770,7 @@ mod tests {
         add_enum(&mut ms2, Some("Wide"), None).unwrap();
         let narrow = add_enum(&mut ms2, Some("Narrow"), Some(1)).unwrap();
         let f = fid(&ms2, c2, 0);
-        retype_field(&mut ms2, c2, f, FieldType::Enum).unwrap();
+        retype_field(&mut ms2, c2, f, FieldType::Enum.into()).unwrap();
         assert_eq!(
             ms2.class_registry.get(c2).unwrap().fields[0].enum_id,
             Some(narrow)
@@ -653,7 +787,7 @@ mod tests {
         )
         .is_err());
         let f0 = fid(&ms, cid, 0);
-        retype_field(&mut ms, cid, f0, FieldType::Enum).unwrap();
+        retype_field(&mut ms, cid, f0, FieldType::Enum.into()).unwrap();
         set_enum(&mut ms, cid, f0, e).unwrap();
         // 2-byte enum in a 4-byte slot: the rest is padded
         assert_eq!(types(&ms, cid), vec![FieldType::Enum, FieldType::Hex16]);
@@ -663,7 +797,7 @@ mod tests {
         set_enum(&mut ms, cid, f0, e).unwrap();
         assert_eq!(types(&ms, cid), vec![FieldType::Enum, FieldType::Hex16]);
         assert!(delete_enum(&mut ms, e).is_err());
-        retype_field(&mut ms, cid, f0, FieldType::Hex16).unwrap();
+        retype_field(&mut ms, cid, f0, FieldType::Hex16.into()).unwrap();
         delete_enum(&mut ms, e).unwrap();
     }
 }
