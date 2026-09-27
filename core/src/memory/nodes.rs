@@ -8,13 +8,16 @@ use serde::{
     Serialize,
 };
 
-use crate::memory::{
-    definitions::{
-        ClassDefinition,
-        ClassDefinitionRegistry,
-        EnumDefinitionRegistry,
+use crate::{
+    layout::Layout,
+    memory::{
+        definitions::{
+            ClassDefinition,
+            ClassDefinitionRegistry,
+            EnumDefinitionRegistry,
+        },
+        types::FieldType,
     },
-    types::FieldType,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -340,61 +343,25 @@ impl MemoryStructure {
         class_registry: &ClassDefinitionRegistry,
         instance: &mut ClassInstance,
     ) {
+        let layout = Layout {
+            classes: class_registry,
+            enums: enum_registry,
+        };
         let mut current_offset: u64 = 0;
         for field in &mut instance.fields {
             field.address = instance.address + current_offset;
             let fd_opt = class_registry
                 .get_by_id(instance.class_id)
                 .and_then(|def| def.fields.iter().find(|fd| fd.id == field.def_id));
-            let advance = if let Some(fd) = fd_opt {
-                match fd.field_type {
-                    FieldType::ClassInstance => {
-                        if let Some(ref mut nested) = field.nested_instance {
-                            nested.address = field.address;
-                            Self::recalc_instance_layout(enum_registry, class_registry, nested);
-                            nested.total_size.min(1_048_576)
-                        } else {
-                            0
-                        }
+            if let Some(fd) = fd_opt {
+                if fd.field_type == FieldType::ClassInstance {
+                    if let Some(ref mut nested) = field.nested_instance {
+                        nested.address = field.address;
+                        Self::recalc_instance_layout(enum_registry, class_registry, nested);
                     }
-                    FieldType::Array => {
-                        // Look up field definition for element and length
-                        let len = fd.array_length.unwrap_or(0) as u64;
-                        let elem_size: u64 = match &fd.array_element {
-                            Some(crate::memory::types::PointerTarget::FieldType(t)) => t.get_size(),
-                            Some(crate::memory::types::PointerTarget::EnumId(eid)) => enum_registry
-                                .get_by_id(*eid)
-                                .map(|ed| ed.default_size as u64)
-                                .unwrap_or(0),
-                            Some(crate::memory::types::PointerTarget::ClassId(cid)) => {
-                                class_registry
-                                    .get_by_id(*cid)
-                                    .map(|cd| cd.total_size)
-                                    .unwrap_or(0)
-                            }
-                            Some(crate::memory::types::PointerTarget::Array { .. }) => 0,
-                            Some(crate::memory::types::PointerTarget::Pointer(_)) => 8,
-                            None => 0,
-                        };
-                        elem_size.saturating_mul(len)
-                    }
-                    FieldType::Enum => {
-                        if let Some(eid) = fd.enum_id {
-                            if let Some(ed) = enum_registry.get_by_id(eid) {
-                                ed.default_size as u64
-                            } else {
-                                4
-                            }
-                        } else {
-                            4
-                        }
-                    }
-                    _ => fd.field_type.get_size(),
                 }
-            } else {
-                0
-            };
-            current_offset = current_offset.saturating_add(advance);
+                current_offset = current_offset.saturating_add(layout.field_size(fd));
+            }
         }
         instance.total_size = current_offset;
     }

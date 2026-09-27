@@ -12,6 +12,110 @@ use crate::memory::{
     types::FieldType,
 };
 
+#[test]
+fn rebuilt_class_array_addresses_match_layout() {
+    use crate::{
+        layout::Layout,
+        memory::PointerTarget,
+    };
+
+    let mut element = ClassDefinition::new("Element".into());
+    element.add_named_field("bytes".into(), FieldType::Array);
+    element.fields[0].array_element = Some(PointerTarget::FieldType(FieldType::UInt8));
+    element.fields[0].array_length = Some(4);
+    element.add_named_field("value".into(), FieldType::UInt32);
+
+    let mut root = ClassDefinition::new("Root".into());
+    root.add_named_field("elements".into(), FieldType::Array);
+    root.fields[0].array_element = Some(PointerTarget::ClassId(element.id));
+    root.fields[0].array_length = Some(2);
+    root.add_named_field("following".into(), FieldType::UInt32);
+    let mut ms = MemoryStructure::new("root".into(), 0x1000, root);
+    ms.register_class(element);
+    ms.rebuild_root_from_registry();
+
+    assert_eq!(
+        Layout::of(&ms).field_offsets(ms.root_class.class_id),
+        vec![(0, 16), (16, 4)]
+    );
+    assert_eq!(ms.root_class.fields[1].address, 0x1010);
+    assert_eq!(ms.root_class.total_size, 20);
+
+    let json = serde_json::to_string(&ms).unwrap();
+    let mut restored: MemoryStructure = serde_json::from_str(&json).unwrap();
+    restored.rebuild_root_from_registry();
+    restored.set_root_address(0x2000);
+    assert_eq!(restored.root_class.fields[1].address, 0x2010);
+    assert_eq!(restored.root_class.total_size, 20);
+}
+
+#[test]
+fn rebuilt_nested_addresses_use_recursive_layout_and_enum_sizes() {
+    use crate::{
+        layout::Layout,
+        memory::{
+            EnumDefinition,
+            PointerTarget,
+        },
+    };
+
+    let mut enumeration = EnumDefinition::new("Enum".into());
+    enumeration.default_size = 8;
+    let mut child = ClassDefinition::new("Child".into());
+    child.add_named_field("matrix".into(), FieldType::Array);
+    child.fields[0].array_element = Some(PointerTarget::Array {
+        element: Box::new(PointerTarget::FieldType(FieldType::UInt16)),
+        length: 3,
+    });
+    child.fields[0].array_length = Some(2);
+    child.add_named_field("small_enum".into(), FieldType::Enum);
+    child.fields[1].enum_id = Some(enumeration.id);
+    child.fields[1].enum_size = Some(1);
+    child.add_named_field("default_enum".into(), FieldType::Enum);
+    child.fields[2].enum_id = Some(enumeration.id);
+    child.add_named_field("missing_enums".into(), FieldType::Array);
+    child.fields[3].array_element = Some(PointerTarget::EnumId(u64::MAX));
+    child.fields[3].array_length = Some(2);
+
+    let mut wrapper = ClassDefinition::new("Wrapper".into());
+    wrapper.add_class_instance("child".into(), &child);
+    wrapper.add_named_field("following".into(), FieldType::UInt8);
+    let mut root = ClassDefinition::new("Root".into());
+    root.add_named_field("wrappers".into(), FieldType::Array);
+    root.fields[0].array_element = Some(PointerTarget::ClassId(wrapper.id));
+    root.fields[0].array_length = Some(2);
+    root.add_class_instance("embedded".into(), &wrapper);
+    root.add_named_field("following".into(), FieldType::UInt32);
+
+    let mut ms = MemoryStructure::new("root".into(), 0x1000, root);
+    ms.enum_registry.register(enumeration);
+    ms.register_class(child);
+    ms.register_class(wrapper);
+    ms.rebuild_root_from_registry();
+    ms.set_root_address(0x2000);
+
+    let layout = Layout::of(&ms);
+    assert_eq!(ms.root_class.fields[1].address, 0x2000 + 60);
+    assert_eq!(ms.root_class.fields[2].address, 0x2000 + 90);
+    assert_eq!(ms.root_class.total_size, 94);
+
+    fn check_instance(layout: Layout<'_>, instance: &ClassInstance) {
+        assert_eq!(instance.total_size, layout.class_size(instance.class_id));
+        for (field, (offset, _)) in instance
+            .fields
+            .iter()
+            .zip(layout.field_offsets(instance.class_id))
+        {
+            assert_eq!(field.address, instance.address + offset);
+            if let Some(nested) = &field.nested_instance {
+                assert_eq!(nested.address, field.address);
+                check_instance(layout, nested);
+            }
+        }
+    }
+    check_instance(layout, &ms.root_class);
+}
+
 #[cfg(test)]
 mod field_type_tests {
     use super::*;
