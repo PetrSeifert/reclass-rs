@@ -8,6 +8,8 @@ type Reply = { type: 'reply'; id: number; ok: boolean; result?: unknown; error?:
 
 export const app = $state({
   connected: false,
+  connecting: false,
+  connectionError: '',
   session: null as Session | null,
   defs: { type: 'defs', classes: [], enums: [], signatures: [] } as Defs,
   frame: null as Frame | null,
@@ -19,19 +21,44 @@ export const app = $state({
 })
 
 let socket: WebSocket | null = null
+// Kept only in this tab's memory. Never put credentials in a URL or storage.
+let apiToken = ''
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let nextId = 1
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
 
-export function connect() {
+export function connect(token?: string) {
+  if (token !== undefined) apiToken = token.trim()
+  if (!/^[0-9a-fA-F]{64,}$/.test(apiToken)) {
+    app.connectionError = 'Enter the API token from the server terminal.'
+    return
+  }
+  clearTimeout(reconnectTimer)
+  socket?.close()
+  app.connected = false
+  app.connecting = true
+  app.connectionError = ''
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const ws = new WebSocket(`${proto}://${location.host}/ws`)
+  const ws = new WebSocket(`${proto}://${location.host}/ws`, ['reclass', `reclass-token.${apiToken}`])
   socket = ws
-  ws.onopen = () => (app.connected = true)
+  let opened = false
+  ws.onopen = () => {
+    if (socket !== ws) return
+    opened = true
+    app.connected = true
+    app.connecting = false
+  }
   ws.onclose = () => {
+    if (socket !== ws) return
     app.connected = false
+    app.connecting = false
     for (const p of pending.values()) p.reject(new Error('disconnected'))
     pending.clear()
-    setTimeout(connect, 1000)
+    if (opened) reconnectTimer = setTimeout(() => connect(), 1000)
+    else {
+      apiToken = ''
+      app.connectionError = 'Connection rejected or unavailable. Check the token, server, and allowed origin, then retry.'
+    }
   }
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data)

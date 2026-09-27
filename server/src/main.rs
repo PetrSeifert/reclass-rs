@@ -3,6 +3,7 @@
 //! plain HTTP (`POST /api/rpc`); every change is pushed to all WebSocket
 //! clients, so a CLI and the browser stay in sync.
 
+mod access;
 mod canvas;
 mod workspace;
 
@@ -86,6 +87,9 @@ struct Args {
     /// Live update interval in milliseconds.
     #[arg(long, default_value_t = 250)]
     tick_ms: u64,
+    /// Additional browser origin to trust, e.g. http://localhost:5173. Repeatable.
+    #[arg(long, value_parser = access::parse_origin)]
+    allowed_origin: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -136,7 +140,19 @@ async fn rpc(State(state): State<AppState>, Json(body): Json<Value>) -> Json<Val
 }
 
 async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| client(socket, state))
+    ws.protocols(["reclass"])
+        .on_upgrade(move |socket| client(socket, state))
+}
+
+fn api_router(state: AppState, access: access::Access) -> Router {
+    Router::new()
+        .route("/ws", get(ws_upgrade))
+        .route("/api/rpc", post(rpc))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::new(access),
+            access::authorize,
+        ))
+        .with_state(state)
 }
 
 async fn client(socket: WebSocket, state: AppState) {
@@ -204,6 +220,7 @@ async fn client(socket: WebSocket, state: AppState) {
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
+    let token = access::startup_token()?;
 
     let provider: Arc<dyn ProcessProvider> = if args.demo {
         Arc::new(DemoProvider)
@@ -274,20 +291,22 @@ async fn main() -> anyhow::Result<()> {
             index.display()
         );
     }
-    let app = Router::new()
-        .route("/ws", get(ws_upgrade))
-        .route("/api/rpc", post(rpc))
-        .fallback_service(ServeDir::new(&args.static_dir).fallback(ServeFile::new(index)))
-        .with_state(state);
+    let listener = tokio::net::TcpListener::bind(args.bind).await?;
+    let bound = listener.local_addr()?;
+    let access = access::Access::new(token, bound, args.allowed_origin);
+    let app = api_router(state, access)
+        .fallback_service(ServeDir::new(&args.static_dir).fallback(ServeFile::new(index)));
 
     if !args.bind.ip().is_loopback() {
         log::warn!(
-            "listening on {}: anyone who can reach this address can read process memory",
+            "listening on {}: use a TLS reverse proxy for remote access to protect the API token and process memory",
             args.bind
         );
     }
-    let listener = tokio::net::TcpListener::bind(args.bind).await?;
-    log::info!("reclass-server on http://{}", args.bind);
+    log::info!("reclass-server on http://{}", bound);
     axum::serve(listener, app).await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod access_tests;

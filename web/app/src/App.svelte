@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import { app, call, connect, selectedRow, toast } from './lib/store.svelte'
   import { fit, tidy } from './lib/geometry.svelte'
   import { closeMenu, menu, renaming } from './lib/menu.svelte'
@@ -17,7 +16,7 @@
   let dialog = $state<'attach' | 'signature' | null>(null)
   let editingSignature = $state<SignatureDef | null>(null)
 
-  onMount(connect)
+  let apiToken = $state('')
 
   // Fit once when the first frame arrives.
   let fitted = false
@@ -83,7 +82,15 @@
 <EnumEditor />
 
 {#if !app.connected}
-  <div class="banner">Connecting to reclass-server…</div>
+  <form class="banner" onsubmit={(event) => { event.preventDefault(); connect(apiToken); apiToken = '' }}>
+    {#if app.connecting}
+      Connecting to reclass-server…
+    {:else}
+      <label>API token <input type="password" bind:value={apiToken} autocomplete="off" spellcheck="false" required /></label>
+      <button type="submit">Connect</button>
+      {#if app.connectionError}<div role="alert">{app.connectionError}</div>{/if}
+    {/if}
+  </form>
 {:else if app.session && !app.session.attached}
   <div class="banner info">
     Not attached to a process. <button onclick={() => (dialog = 'attach')}>Attach…</button>
