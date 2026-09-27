@@ -825,6 +825,71 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_cards_survive_and_recover() {
+        for expr in ["[", "0xDEAD"] {
+            let mut ws = demo();
+            let f = ws.frame();
+            let player = call(
+                &mut ws,
+                "follow",
+                json!({
+                    "card": ROOT, "key": row(&cards(&f)[0], "localPlayer")["key"]
+                }),
+            )["card"]
+                .clone();
+            let f = ws.frame();
+            let weapon = call(
+                &mut ws,
+                "follow",
+                json!({
+                    "card": player, "key": row(&cards(&f)[1], "weapon")["key"]
+                }),
+            )["card"]
+                .clone();
+            ws.canvas
+                .move_card(player.as_u64().unwrap(), 123.0, 456.0)
+                .unwrap();
+            ws.canvas
+                .toggle_expand(player.as_u64().unwrap(), "/saved-expansion")
+                .unwrap();
+            let healthy = ws.frame();
+            let saved = serde_json::to_value(&ws.canvas).unwrap();
+            call(&mut ws, "setRoot", json!({ "expr": expr }));
+            for _ in 0..2 {
+                let failed = ws.frame();
+                assert_eq!(
+                    serde_json::to_value(&ws.canvas).unwrap(),
+                    saved,
+                    "resolution failure must not alter the persisted graph"
+                );
+                assert_eq!(cards(&failed).len(), 3);
+                for card in &cards(&failed)[1..] {
+                    assert!(card["base"].is_null());
+                    assert!(card["error"].as_str().is_some_and(|e| !e.is_empty()));
+                    assert_eq!(card["links"][0]["ok"], false);
+                }
+            }
+            // Saving and loading while unresolved must preserve recovery too.
+            let project = ws.project();
+            let mut restored = Workspace::new(Arc::new(DemoProvider), Some(project), None, true);
+            restored.attach(DEMO_PID).unwrap();
+            assert_eq!(cards(&restored.frame()).len(), 3);
+            for workspace in [&mut ws, &mut restored] {
+                call(workspace, "setRoot", json!({ "expr": "[$GWorld]" }));
+                let recovered = workspace.frame();
+                assert_eq!(cards(&recovered), cards(&healthy));
+                call(workspace, "setRoot", json!({ "expr": expr }));
+                workspace.frame();
+                call(workspace, "closeCard", json!({ "card": player }));
+                let closed = workspace.frame();
+                assert!(cards(&closed)
+                    .iter()
+                    .all(|c| c["id"] != player && c["id"] != weapon));
+            }
+        }
+    }
+
+    #[test]
     fn root_resolves_through_signature() {
         let mut ws = demo();
         let f = ws.frame();

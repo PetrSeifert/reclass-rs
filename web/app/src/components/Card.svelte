@@ -110,7 +110,7 @@
     {#each card.rows as row (row.key)}
       <Row {card} {row} />
     {:else}
-      <div class="empty">Address does not resolve</div>
+      <div class="empty" title={card.error ?? undefined}>{card.error ?? 'Address does not resolve'}</div>
     {/each}
   </div>
   <div class="nf">
@@ -157,7 +157,7 @@
   .x { border: none; background: none; color: var(--faint); width: 20px; height: 20px; border-radius: 5px; cursor: pointer; flex: none; }
   .x:hover { background: #ffffff14; color: var(--text); }
   .nb { padding: 4px 0 6px; }
-  .empty { height: 24px; line-height: 24px; padding: 0 12px; color: var(--bad); }
+  .empty { height: 24px; line-height: 24px; padding: 0 12px; color: var(--bad); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nf { height: 43px; box-sizing: content-box; display: flex; gap: 6px; align-items: center; padding: 0 12px; border-top: 1px solid var(--edge); }
   .nf button { border: 1px solid var(--edge2); background: transparent; color: var(--dim); border-radius: 7px; padding: 3px 8px; font-size: 11px; cursor: pointer; }
   .nf button:hover { color: var(--text); border-color: var(--accent); }

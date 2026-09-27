@@ -5,8 +5,8 @@
 //! anchor: its live value decides the card's address. Further links are aliases
 //! that are only drawn as wires; if their pointer moves away they go stale, but
 //! they never move or close the card, so pointer churn can't rearrange the canvas.
-//! A card whose anchor disappears is re-anchored on an alias that still reaches
-//! the same instance, or closed when there is none.
+//! A card whose anchor cannot resolve is re-anchored on an alias that still
+//! reaches the same instance, or kept with an error until it recovers or is closed.
 
 use std::collections::{
     BTreeSet,
@@ -52,6 +52,9 @@ pub struct Card {
     pub y: f64,
     #[serde(default)]
     pub expanded: BTreeSet<String>,
+    /// Retain the class label when the anchor is temporarily unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    class_id: Option<u64>,
     /// Instance the card showed last frame; used to pick a replacement anchor.
     #[serde(skip)]
     last: Option<(u64, u64)>,
@@ -72,6 +75,7 @@ impl Default for Canvas {
                 x: 0.0,
                 y: 0.0,
                 expanded: BTreeSet::new(),
+                class_id: None,
                 last: None,
             }],
             share: true,
@@ -116,6 +120,7 @@ impl RowData {
 
 pub struct Resolved {
     pub class_id: u64,
+    pub error: Option<String>,
     pub base: Option<u64>,
     pub via: Option<String>,
     pub enc: bool,
@@ -237,8 +242,8 @@ impl Canvas {
             .map(|c| c.id)
     }
 
-    /// Resolves every card against live memory. Cards that can no longer be
-    /// reached are removed.
+    /// Resolves every card against live memory, retaining unresolved cards.
+    /// Only cards orphaned by explicit unlinking or closing are removed.
     pub fn resolve(
         &mut self,
         dec: &Decoder,
@@ -257,6 +262,9 @@ impl Canvas {
             ROOT,
             Resolved {
                 class_id: root_class,
+                error: root_base
+                    .is_none()
+                    .then(|| "Root address does not resolve".into()),
                 base: root_base,
                 via: None,
                 enc: false,
@@ -281,10 +289,12 @@ impl Canvas {
                     let rows = build_rows(dec, class_id, base, &card.expanded);
                     let id = card.id;
                     self.cards[i].last = Some((class_id, base));
+                    self.cards[i].class_id = Some(class_id);
                     done.insert(
                         id,
                         Resolved {
                             class_id,
+                            error: None,
                             base: Some(base),
                             via: Some(via),
                             enc,
@@ -322,8 +332,8 @@ impl Canvas {
             let dead: Vec<u64> = self
                 .cards
                 .iter()
+                .filter(|c| c.id != ROOT && c.links.is_empty())
                 .map(|c| c.id)
-                .filter(|id| !done.contains_key(id))
                 .collect();
             if dead.is_empty() {
                 break;
@@ -331,6 +341,34 @@ impl Canvas {
             for id in dead {
                 self.remove_card(id, &done);
             }
+        }
+        // A failed read is not a graph edit. Keep the links, position, expansion
+        // state and last instance so the next frame can resolve the card again.
+        for card in &self.cards {
+            if done.contains_key(&card.id) {
+                continue;
+            }
+            let row = card.links.first().and_then(|link| {
+                done.get(&link.card)?
+                    .rows
+                    .iter()
+                    .find(|r| r.key == link.key)
+            });
+            let error = row
+                .and_then(|r| r.decoded.error.clone())
+                .unwrap_or_else(|| "Anchor pointer does not resolve".into());
+            done.insert(
+                card.id,
+                Resolved {
+                    class_id: card.class_id.or(card.last.map(|last| last.0)).unwrap_or(0),
+                    error: Some(error),
+                    base: None,
+                    via: row.and_then(|r| r.field.name.clone()),
+                    enc: row.is_some_and(|r| r.field.field_type == FieldType::EncryptedPointer),
+                    rows: vec![],
+                    dup_of: None,
+                },
+            );
         }
         // Two anchors that lead to the same instance: offer a merge (never automatic).
         if self.share {
@@ -448,6 +486,7 @@ impl Canvas {
             x,
             y,
             expanded: BTreeSet::new(),
+            class_id: Some(target.0),
             last: Some(target),
         });
         Ok(Some(id))
@@ -562,7 +601,9 @@ impl Canvas {
                             card: l.card,
                             key: l.key.clone(),
                             anchor: card.id != ROOT && i == 0,
-                            ok: t.as_ref().map(|t| (t.0, t.1)) == instance(card.id),
+                            ok: t
+                                .as_ref()
+                                .is_some_and(|t| Some((t.0, t.1)) == instance(card.id)),
                             label: t.as_ref().map(|t| t.2.clone()).unwrap_or_default(),
                             encrypted: t.map(|t| t.3).unwrap_or(false),
                             now: resolved
@@ -584,6 +625,7 @@ impl Canvas {
                         .unwrap_or_default(),
                     size: dec.layout.class_size(r.class_id),
                     base: r.base.map(hex),
+                    error: r.error.clone(),
                     via: r.via.clone(),
                     encrypted: r.enc,
                     is_root: card.id == ROOT,
@@ -725,6 +767,7 @@ pub struct CardView {
     pub class_name: String,
     pub size: u64,
     pub base: Option<String>,
+    pub error: Option<String>,
     pub via: Option<String>,
     pub encrypted: bool,
     pub is_root: bool,

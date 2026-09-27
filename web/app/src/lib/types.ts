@@ -95,6 +95,7 @@ export interface CardView {
   className: string
   size: number
   base: string | null
+  error: string | null
   via: string | null
   encrypted: boolean
   isRoot: boolean
