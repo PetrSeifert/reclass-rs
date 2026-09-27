@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { app, call, connect, selectedRow, toast } from './lib/store.svelte'
+  import { app, call, changeToken, connect, selectedRow, toast } from './lib/store.svelte'
   import { fit, tidy } from './lib/geometry.svelte'
   import { closeMenu, menu, renaming } from './lib/menu.svelte'
   import type { SignatureDef } from './lib/types'
@@ -85,6 +85,7 @@
   <form class="banner" onsubmit={(event) => { event.preventDefault(); connect(apiToken); apiToken = '' }}>
     {#if app.connecting}
       Connecting to reclass-server…
+      <button type="button" onclick={changeToken}>Change token</button>
     {:else}
       <label>API token <input type="password" bind:value={apiToken} autocomplete="off" spellcheck="false" required /></label>
       <button type="submit">Connect</button>

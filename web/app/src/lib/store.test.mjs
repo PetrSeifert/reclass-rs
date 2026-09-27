@@ -38,6 +38,41 @@ function setup() {
 
 const token = 'a'.repeat(64)
 
+test('changing the token cancels backoff and allows a fresh connection', async () => {
+  const client = setup()
+  client.connect(token)
+  const oldSocket = client.sockets.at(-1)
+  oldSocket.onopen()
+  await oldSocket.onclose()
+  assert.equal(client.timers.size, 1)
+  client.changeToken()
+  assert.equal(client.app.connecting, false)
+  assert.equal(client.timers.size, 0)
+  oldSocket.onopen()
+  await oldSocket.onclose()
+  assert.equal(client.app.connected, false)
+  assert.equal(client.timers.size, 0)
+  client.connect('b'.repeat(64))
+  assert.equal(client.sockets.at(-1).protocols[1], `reclass-token.${'b'.repeat(64)}`)
+  client.sockets.at(-1).onopen()
+  await client.sockets.at(-1).onclose()
+  assert.equal(client.retry(), 1000)
+})
+
+test('changing the token during an auth probe keeps the form available after it settles', async () => {
+  for (const status of [204, 401, 503]) {
+    const client = setup()
+    client.connect(token)
+    const closed = client.sockets.at(-1).onclose()
+    client.changeToken()
+    client.requests[0].resolve({ status })
+    await closed
+    assert.equal(client.app.connecting, false)
+    assert.equal(client.app.connectionError, '')
+    assert.equal(client.timers.size, 0)
+  }
+})
+
 test('retains the token through repeated restart failures and resets backoff after recovery', async () => {
   const client = setup()
   client.connect(token)

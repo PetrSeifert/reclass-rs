@@ -28,6 +28,22 @@ let reconnectDelay = 1000
 let nextId = 1
 const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
 
+/** Stops reconnecting so the user can enter a different token. */
+export function changeToken() {
+  clearTimeout(reconnectTimer)
+  const previous = socket
+  // Invalidate callbacks and any in-flight auth probe before closing.
+  socket = null
+  previous?.close()
+  apiToken = ''
+  reconnectDelay = 1000
+  app.connected = false
+  app.connecting = false
+  app.connectionError = ''
+  for (const p of pending.values()) p.reject(new Error('disconnected'))
+  pending.clear()
+}
+
 export function connect(token?: string) {
   if (token !== undefined) {
     apiToken = token.trim()
