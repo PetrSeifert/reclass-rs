@@ -25,6 +25,13 @@ pub trait MemorySource: Send + Sync {
     fn process(&self) -> ProcessEntry;
     fn modules(&self) -> Vec<ModuleEntry>;
     fn read(&self, address: u64, buffer: &mut [u8]) -> anyhow::Result<()>;
+    /// Whether `write` can work. Not every driver can write memory.
+    fn can_write(&self) -> bool {
+        false
+    }
+    fn write(&self, _address: u64, _bytes: &[u8]) -> anyhow::Result<()> {
+        anyhow::bail!("the driver cannot write memory")
+    }
     fn resolve_signature(&self, signature: &SignatureDef) -> anyhow::Result<u64>;
     /// Decrypts the raw value of an `EncryptedPointer` field.
     fn decrypt(&self, value: u64) -> anyhow::Result<u64>;

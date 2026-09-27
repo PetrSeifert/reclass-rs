@@ -1,12 +1,14 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { app, call } from '../lib/store.svelte'
-  import { fieldMenu, follow, openMenu, renaming } from '../lib/menu.svelte'
+  import { editValue, fieldMenu, follow, openMenu, renaming, writeBlock, writing } from '../lib/menu.svelte'
   import { SHORT, type CardView, type Row } from '../lib/types'
 
   let { card, row }: { card: CardView; row: Row } = $props()
 
   const selected = $derived(app.selected?.card === card.id && app.selected?.key === row.key)
   const editing = $derived(renaming.card === card.id && renaming.key === row.key)
+  const writingValue = $derived(writing.card === card.id && writing.key === row.key)
 
   // Flash the value when it changes (not on first render).
   let valueEl: HTMLSpanElement | undefined = $state()
@@ -38,13 +40,26 @@
     }
   }
 
+  // Start from the value shown when editing began; live frames must not overwrite typing.
+  let value = $state('')
+  $effect(() => {
+    if (writingValue) value = untrack(() => row.value)
+  })
+  async function write() {
+    const typed = value
+    writing.key = ''
+    if (typed.trim() && typed !== row.value) await call('write', { card: card.id, key: row.key, value: typed })
+  }
+
   function select(e: MouseEvent) {
     if (e.button !== 0) return
     app.selected = { card: card.id, key: row.key }
   }
 
   function dblclick(e: MouseEvent) {
-    if ((e.target as HTMLElement).closest('.n') && row.classId != null && !row.ty.startsWith('Hex')) {
+    if ((e.target as HTMLElement).closest('.v') && !writeBlock(row)) {
+      editValue(card, row)
+    } else if ((e.target as HTMLElement).closest('.n') && row.classId != null && !row.ty.startsWith('Hex')) {
       Object.assign(renaming, { card: card.id, key: row.key })
     } else if (row.port && row.port.state !== 'null') {
       follow(card, row)
@@ -115,7 +130,25 @@
       <span class="g" title={guesses.map((g) => g.text).join(' · ')}>{#each guesses as g, i (i)}<span style:color="var(--k-{g.cat})">{g.text}</span>{/each}</span>
     {/if}
   </span>
-  <span class="v" class:err={!!row.error} bind:this={valueEl} title={[row.error, ...row.hints].filter(Boolean).join(' · ')}>{row.value}</span>
+  {#if writingValue}
+    <input
+      class="inline-edit value-edit"
+      bind:value
+      use:focus
+      spellcheck="false"
+      title="Enter writes to memory · Esc cancels"
+      onmousedown={(e) => e.stopPropagation()}
+      ondblclick={(e) => e.stopPropagation()}
+      onblur={() => (writing.key = '')}
+      onkeydown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') write()
+        if (e.key === 'Escape') writing.key = ''
+      }}
+    />
+  {:else}
+    <span class="v" class:err={!!row.error} bind:this={valueEl} title={[row.error, ...row.hints].filter(Boolean).join(' · ')}>{row.value}</span>
+  {/if}
   {#if row.port}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <span
@@ -163,5 +196,6 @@
   .port.enc { border-color: var(--accent2); border-style: dashed; }
   .port.enc.open { background: var(--accent2); }
   @keyframes blinkp { 50% { box-shadow: 0 0 0 4px rgba(255, 107, 125, 0.25); } }
+  .inline-edit.value-edit { width: 175px; font: 11.5px var(--mono); text-align: right; }
   .inline-edit { background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 4px; font: 12px var(--ui); outline: none; padding: 0 4px; height: 19px; width: 130px; }
 </style>

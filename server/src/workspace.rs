@@ -10,6 +10,7 @@ use std::{
 
 use reclass_core::{
     decode::{
+        element_field,
         type_label,
         Decoder,
     },
@@ -17,6 +18,7 @@ use reclass_core::{
         self,
         TypeSpec,
     },
+    encode::encode,
     expr::{
         self,
         ExprContext,
@@ -24,6 +26,7 @@ use reclass_core::{
     layout::Layout,
     memory::{
         ClassDefinition,
+        FieldType,
         MemoryStructure,
         PointerTarget,
     },
@@ -350,6 +353,7 @@ impl Workspace {
             "dirty": self.dirty,
             "demo": self.demo,
             "pointerSize": self.memory.pointer_size,
+            "canWrite": self.source.as_ref().is_some_and(|s| s.can_write()),
         })
     }
 
@@ -506,6 +510,58 @@ impl Workspace {
                     .ok_or_else(|| format!("cannot read 0x{addr:X}"))?;
                 Ok((
                     json!({ "address": hex(addr), "bytes": bytes.iter().map(|b| format!("{b:02X}")).collect::<String>() }),
+                    Changed::NONE,
+                ))
+            }
+            "write" => {
+                // A value typed for a card row, or for a type at an address.
+                #[derive(Deserialize)]
+                struct A {
+                    value: String,
+                    card: Option<u64>,
+                    key: Option<String>,
+                    address: Option<String>,
+                    ty: Option<FieldType>,
+                    target: Option<PointerTarget>,
+                }
+                let a: A = arg(p)?;
+                let src = self.source.clone().ok_or("not attached")?;
+                if !src.can_write() {
+                    return Err("the driver cannot write memory".into());
+                }
+                let (fd, address) = match (a.card, a.key, a.address, a.ty) {
+                    (Some(card), Some(key), None, None) => {
+                        // Where the row is now, not where the last frame saw it.
+                        self.resolve();
+                        let row = self
+                            .resolved
+                            .get(&card)
+                            .and_then(|r| r.rows.iter().find(|r| r.key == key))
+                            .ok_or("unknown row")?;
+                        (row.field.clone(), row.address)
+                    }
+                    (None, None, Some(address), Some(ty)) => {
+                        let mut fd = element_field(&PointerTarget::FieldType(ty), 0);
+                        match a.target {
+                            Some(PointerTarget::EnumId(id)) => fd.enum_id = Some(id),
+                            t => fd.pointer_target = t,
+                        }
+                        (fd, self.eval(&address)?)
+                    }
+                    _ => return Err("pass card and key, or address and ty".into()),
+                };
+                let layout = Layout::of(&self.memory);
+                let bytes = match encode(&layout, &fd, &a.value) {
+                    // Pointers also take an address expression, e.g. `<game.exe>+0x10`.
+                    Err(e) if fd.field_type == FieldType::Pointer => {
+                        let v = self.eval(&a.value).map_err(|_| e)?;
+                        encode(&layout, &fd, &format!("{v:X}"))?
+                    }
+                    r => r?,
+                };
+                src.write(address, &bytes).map_err(|e| e.to_string())?;
+                Ok((
+                    json!({ "address": hex(address), "bytes": bytes.iter().map(|b| format!("{b:02X}")).collect::<String>() }),
                     Changed::NONE,
                 ))
             }
@@ -1207,6 +1263,85 @@ mod tests {
         assert_eq!(cards(&f).len(), 2, "canvas restored");
         assert_eq!(row(&cards(&f)[1], "armor")["value"], "50.0");
         std::fs::remove_file(dir).ok();
+    }
+
+    #[test]
+    fn values_are_written_to_rows_and_addresses() {
+        let mut ws = demo();
+        assert_eq!(ws.session()["canWrite"], true);
+        let f = ws.frame();
+        let key = row(&cards(&f)[0], "entityCount")["key"].clone();
+        call(
+            &mut ws,
+            "write",
+            json!({ "card": ROOT, "key": key, "value": "42" }),
+        );
+        call(
+            &mut ws,
+            "write",
+            json!({ "card": ROOT, "key": row(&cards(&f)[0], "mapName")["key"], "value": "\"de_dust\"" }),
+        );
+        let r = call(
+            &mut ws,
+            "write",
+            json!({ "address": "[$GWorld]+0x20", "ty": "Float", "value": "0.5" }),
+        );
+        assert_eq!(r["bytes"], "0000003F");
+        let f = ws.frame();
+        assert_eq!(row(&cards(&f)[0], "entityCount")["value"], "42");
+        assert_eq!(row(&cards(&f)[0], "mapName")["value"], "\"de_dust\"");
+        assert_eq!(row(&cards(&f)[0], "timeScale")["value"], "0.5");
+
+        let err = ws.handle(
+            "write",
+            &json!({ "card": ROOT, "key": key, "value": "lots" }),
+        );
+        assert!(err.err().unwrap().contains("not an integer"));
+        let err = ws.handle(
+            "write",
+            &json!({ "address": "0x10", "ty": "UInt8", "value": "1" }),
+        );
+        assert!(err.err().unwrap().contains("cannot write"));
+    }
+
+    #[test]
+    fn drivers_without_writes_refuse_them() {
+        struct ReadOnly(DemoSource);
+        impl MemorySource for ReadOnly {
+            fn process(&self) -> reclass_core::source::ProcessEntry {
+                self.0.process()
+            }
+            fn modules(&self) -> Vec<ModuleEntry> {
+                self.0.modules()
+            }
+            fn read(&self, address: u64, buffer: &mut [u8]) -> anyhow::Result<()> {
+                self.0.read(address, buffer)
+            }
+            fn resolve_signature(&self, sig: &SignatureDef) -> anyhow::Result<u64> {
+                self.0.resolve_signature(sig)
+            }
+            fn decrypt(&self, value: u64) -> anyhow::Result<u64> {
+                self.0.decrypt(value)
+            }
+        }
+        struct Provider;
+        impl ProcessProvider for Provider {
+            fn list_processes(&self) -> anyhow::Result<Vec<reclass_core::source::ProcessEntry>> {
+                Ok(vec![])
+            }
+            fn attach(&self, _: u32) -> anyhow::Result<Arc<dyn MemorySource>> {
+                Ok(Arc::new(ReadOnly(DemoSource::new())))
+            }
+        }
+        let mut ws = Workspace::new(Arc::new(Provider), None, None, false);
+        assert_eq!(ws.session()["canWrite"], false);
+        ws.attach(DEMO_PID).unwrap();
+        assert_eq!(ws.session()["canWrite"], false);
+        let err = ws.handle(
+            "write",
+            &json!({ "address": "0x1F3A8C40000", "ty": "UInt8", "value": "1" }),
+        );
+        assert_eq!(err.err().unwrap(), "the driver cannot write memory");
     }
 
     #[test]

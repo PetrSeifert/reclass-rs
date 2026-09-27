@@ -33,6 +33,8 @@ export interface Session {
   demo: boolean
   /** 8, or 4 for 32-bit processes. */
   pointerSize: number
+  /** Whether the driver can write the process's memory. */
+  canWrite: boolean
 }
 
 export interface FieldDef { id: number; name: string | null; ty: FieldType; typeLabel: string; offset: number; size: number }

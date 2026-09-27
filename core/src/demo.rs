@@ -465,6 +465,21 @@ impl MemorySource for DemoSource {
         Ok(())
     }
 
+    fn can_write(&self) -> bool {
+        true
+    }
+
+    fn write(&self, address: u64, bytes: &[u8]) -> anyhow::Result<()> {
+        let mut m = self.memory.lock().unwrap();
+        let end = address + bytes.len().max(1) as u64 - 1;
+        anyhow::ensure!(
+            m.readable(address) && m.readable(end),
+            "cannot write 0x{address:X}"
+        );
+        m.write(address, bytes);
+        Ok(())
+    }
+
     fn resolve_signature(&self, sig: &SignatureDef) -> anyhow::Result<u64> {
         match sig.name.as_str() {
             "GWorld" => Ok(GWORLD_GLOBAL),

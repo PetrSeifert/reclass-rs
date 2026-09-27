@@ -46,6 +46,10 @@ entering it again. Treat the token as access to the entire shared workspace.
 - 32-bit (WOW64) processes work too: attaching reads the image's PE header and converts
   the project to 4-byte pointers, keeping every other field at its offset
   (`reclass pointer-size` shows or changes it)
+- Values can be written into the process when the driver supports it (it reports the
+  `MemoryWrite` feature; the user-mode driver does not). Double-click a value or press
+  Enter on a selected field, type the new value and press Enter. With a read-only
+  driver, editing is disabled and `write` calls fail with an error.
 - `--decrypt-module <name>` sets the module holding XenuineDecrypt for encrypted pointers
   (defaults to the process image)
 - The project file is the same `memory_structure.json` the egui app uses; the canvas is
@@ -78,6 +82,7 @@ reclass next 93                 # keep those that now hold 93
 reclass next decreased          # or compare with the last scan
 reclass scan f32 unknown        # snapshot everything when the value is not shown
 reclass results                 # addresses with their current values
+reclass write 0x1F3A8D12460 i32 100   # set it, if the driver can write memory
 ```
 
 The driver cannot list memory regions, so scans find readable memory by probing:
@@ -125,7 +130,7 @@ Commands (see `server/src/workspace.rs`): `processes`, `attach`, `detach`, `modu
 `setEnum`, `setArray`, `addClass`, `renameClass`, `deleteClass`, `deleteUnusedClasses`,
 `setSignature`, `removeSignature`, `rescan`, `follow`, `closeCard`, `closeAll`,
 `mergeCard`, `toggleExpand`, `moveCards`, `setShare`, `save`, `load`, `newProject`,
-`scan`, `scanNext`, `scanResults`, `scanClear`.
+`scan`, `scanNext`, `scanResults`, `scanClear`, `write`.
 The WebSocket at `/ws` takes the same `{id, method, params}` messages and streams
 `session`, `defs` and `frame` updates.
 

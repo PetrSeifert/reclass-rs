@@ -23,6 +23,7 @@ use vtd_libum::{
         },
         types::{
             DirectoryTableType,
+            DriverFeature,
             ProcessId,
             ProcessModuleInfo,
         },
@@ -164,6 +165,22 @@ impl AppHandle {
 
     pub fn read_slice<T: Copy>(&self, address: u64, buffer: &mut [T]) -> anyhow::Result<()> {
         Ok(self.ke_interface.read_slice(
+            self.process_id,
+            DirectoryTableType::Default,
+            address,
+            buffer,
+        )?)
+    }
+
+    /// Whether the driver implements memory writes.
+    pub fn can_write(&self) -> bool {
+        self.ke_interface
+            .driver_features()
+            .contains(DriverFeature::MemoryWrite)
+    }
+
+    pub fn write_slice(&self, address: u64, buffer: &[u8]) -> anyhow::Result<()> {
+        Ok(self.ke_interface.write_slice(
             self.process_id,
             DirectoryTableType::Default,
             address,

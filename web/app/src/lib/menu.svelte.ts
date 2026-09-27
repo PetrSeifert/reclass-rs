@@ -34,6 +34,23 @@ export function closeMenu() {
 /** Row currently being renamed inline. */
 export const renaming = $state({ card: 0, key: '' })
 
+/** Row whose value is being edited inline, to be written into the process. */
+export const writing = $state({ card: 0, key: '' })
+
+/** Why a row's value cannot be written, or '' when it can. */
+export function writeBlock(row: Row): string {
+  if (!app.session?.canWrite) return 'driver is read-only'
+  if (['ClassInstance', 'Array'].includes(row.ty)) return 'edit the fields inside'
+  if (row.ty === 'TextPointer') return 'follow it to edit the text'
+  if (row.ty === 'EncryptedPointer') return 'encrypted'
+  if (row.value === '<unreadable>') return 'unreadable'
+  return ''
+}
+
+export function editValue(card: CardView, row: Row) {
+  if (!writeBlock(row)) Object.assign(writing, { card: card.id, key: row.key })
+}
+
 const hex = (n: number) => n.toString(16).toUpperCase()
 const same = (a: PointerTarget | null, b: PointerTarget) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -90,6 +107,8 @@ export function fieldMenu(card: CardView, row: Row): MenuItem[] {
     const linked = row.port.state === 'open'
     items.push({ label: linked ? 'Unlink card' : 'Follow pointer', hint: 'port', onClick: () => follow(card, row) })
   }
+  const block = writeBlock(row)
+  items.push({ label: 'Edit value', hint: block || 'Enter', disabled: !!block, onClick: () => editValue(card, row) })
   if (editable) {
     items.push({
       label: 'Change type',

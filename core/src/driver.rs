@@ -105,6 +105,15 @@ impl MemorySource for DriverSource {
         self.handle.read_slice(address, buffer)
     }
 
+    fn can_write(&self) -> bool {
+        self.handle.can_write()
+    }
+
+    fn write(&self, address: u64, bytes: &[u8]) -> anyhow::Result<()> {
+        anyhow::ensure!(self.can_write(), "the driver cannot write memory");
+        self.handle.write_slice(address, bytes)
+    }
+
     fn resolve_signature(&self, sig: &SignatureDef) -> anyhow::Result<u64> {
         let pattern = sig.sanitized_pattern();
         // Validate first: the Signature constructors panic on invalid patterns.

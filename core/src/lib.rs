@@ -7,6 +7,7 @@ pub mod decrypt;
 pub mod demo;
 pub mod driver;
 pub mod edit;
+pub mod encode;
 pub mod expr;
 pub mod layout;
 pub mod memory;

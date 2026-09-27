@@ -442,7 +442,7 @@ enum Value {
     },
 }
 
-fn parse_int(s: &str) -> Option<i128> {
+pub(crate) fn parse_int(s: &str) -> Option<i128> {
     let s = s.trim();
     let (neg, digits) = match s.strip_prefix('-') {
         Some(d) => (true, d),

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { app, call, changeToken, connect, selectedRow, toast } from './lib/store.svelte'
   import { fit, tidy } from './lib/geometry.svelte'
-  import { closeMenu, menu, renaming } from './lib/menu.svelte'
+  import { closeMenu, editValue, menu, renaming } from './lib/menu.svelte'
   import type { SignatureDef } from './lib/types'
   import Canvas from './components/Canvas.svelte'
   import Toolbar from './components/Toolbar.svelte'
@@ -51,6 +51,9 @@
     else if (e.key === 'F2' && sel && sel.row.classId != null && !sel.row.ty.startsWith('Hex')) {
       e.preventDefault()
       Object.assign(renaming, { card: sel.card.id, key: sel.row.key })
+    } else if (e.key === 'Enter' && sel) {
+      e.preventDefault()
+      editValue(sel.card, sel.row)
     } else if (e.key === 'Delete' && sel?.row.classId != null) {
       call('removeField', { classId: sel.row.classId, fieldId: sel.row.fieldId })
     } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && sel) {

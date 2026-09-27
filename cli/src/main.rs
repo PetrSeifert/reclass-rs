@@ -67,6 +67,7 @@ Finding a value (e.g. health is 100, then 93 after taking damage):
   reclass next decreased                  or: keep those that went down
   reclass results                         list what is left
   reclass scan f32 unknown                when the value is not shown anywhere
+  reclass write 0x1F3A8D12460 i32 100     then set it, if the driver can write
 
 Pointers are printed with 0x so they can be pasted back as EXPR.
 Add --json to any command for the server's raw reply.";
@@ -268,6 +269,23 @@ Converting keeps every other field at its offset: shrinking pointers are padded
 with hex fields and growing pointers consume the bytes after them."
     )]
     PointerSize { size: Option<u64> },
+    /// Write a value into the process, typed as TYPE. Needs a driver that can write.
+    #[command(
+        after_help = "VALUE is written the way `view` shows it: 100, -1, 0x64, 1.5, true, (1, 2, 3),
+hex digits for hex types, \"text\" (NUL-terminated, 31 bytes at most), an enum
+variant or A | B for flags. Pointers take an address expression or nullptr.
+
+  reclass write '[$GWorld]+0x18' i32 42
+  reclass write 0x1F3A8D12460 f32 100
+  reclass write '[$GWorld]+0x28' text de_dust"
+    )]
+    Write {
+        expr: String,
+        #[arg(value_name = "TYPE")]
+        ty: String,
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
     /// Save the project, to PATH or the current project file.
     Save { path: Option<String> },
     /// Send any server method, e.g. `reclass call snapshot`.
@@ -352,8 +370,13 @@ impl App {
                     vec![
                         "process".into(),
                         format!(
-                            "{process}, {}-bit",
-                            session["pointerSize"].as_u64().unwrap_or(8) * 8
+                            "{process}, {}-bit{}",
+                            session["pointerSize"].as_u64().unwrap_or(8) * 8,
+                            if session["attached"].is_null() || session["canWrite"] == true {
+                                ""
+                            } else {
+                                ", read-only (the driver cannot write)"
+                            }
                         ),
                     ],
                     vec![
@@ -824,6 +847,23 @@ impl App {
             DeleteSig { name } => {
                 self.call("removeSignature", json!({ "name": name }))?;
                 Ok(format!("deleted ${name}\n"))
+            }
+            Write { expr, ty, value } => {
+                let mut params = self.defs()?.type_spec(&ty)?;
+                params["address"] = json!(expr);
+                params["value"] = json!(value);
+                let r = self.call("write", params)?;
+                if self.json {
+                    return raw(r);
+                }
+                let bytes = r["bytes"].as_str().unwrap_or("");
+                Ok(format!(
+                    "wrote {} bytes at 0x{}: {}
+",
+                    bytes.len() / 2,
+                    r["address"].as_str().unwrap_or("?"),
+                    bytes
+                ))
             }
             Save { path } => {
                 let params = match path {
