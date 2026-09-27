@@ -34,7 +34,8 @@ use crate::{
 
 pub const DEMO_PID: u32 = 6716;
 const ENC_KEY: u64 = 0x3A5F_00C0_FFEE_1234;
-const HEAP: (u64, u64) = (0x1F3_0000_0000, 0x1F4_0000_0000);
+/// Readable heap: a few MiB around the objects, so tools that walk memory stay quick.
+const HEAP: (u64, u64) = (0x1F3_A8C0_0000, 0x1F3_A900_0000);
 
 const EXE_BASE: u64 = 0x7FF6_A260_0000;
 const GWORLD_GLOBAL: u64 = EXE_BASE + 0x5A_1230;
@@ -211,9 +212,14 @@ impl Memory {
         if !self.readable(addr) || !self.readable(addr + buf.len() as u64 - 1) {
             return false;
         }
-        for (i, b) in buf.iter_mut().enumerate() {
-            let a = addr + i as u64;
-            *b = self.page(a / 4096)[(a % 4096) as usize];
+        // Page by page: scanners read megabytes at a time.
+        let mut done = 0;
+        while done < buf.len() {
+            let a = addr + done as u64;
+            let at = (a % 4096) as usize;
+            let n = (4096 - at).min(buf.len() - done);
+            buf[done..done + n].copy_from_slice(&self.page(a / 4096)[at..at + n]);
+            done += n;
         }
         true
     }

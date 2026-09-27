@@ -11,5 +11,6 @@ pub mod expr;
 pub mod layout;
 pub mod memory;
 pub mod project;
+pub mod scan;
 pub mod signature;
 pub mod source;

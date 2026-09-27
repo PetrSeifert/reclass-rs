@@ -70,6 +70,21 @@ reclass define Player 0x1C f32 health        # type and name the bytes at an off
 reclass view '[$GWorld]+0x28' -c Player -f 1  # follow class pointers one level
 ```
 
+To find where a value lives, scan for it and narrow the results as it changes:
+
+```sh
+reclass scan i32 100            # every address holding 100 (or: f32, text, bytes, …)
+reclass next 93                 # keep those that now hold 93
+reclass next decreased          # or compare with the last scan
+reclass scan f32 unknown        # snapshot everything when the value is not shown
+reclass results                 # addresses with their current values
+```
+
+The driver cannot list memory regions, so scans find readable memory by probing:
+a 32-bit process is covered whole, a 64-bit one through its modules and the heap
+memory their pointers lead to. `--module` or `--range` narrows a scan, and
+read-only parts of module images are skipped unless `--read-only` is given.
+
 `reclass --help` documents address expressions, field references
 (`Player.health`, `Player+0x1C`) and the type syntax (`Player*`, `f32[4]`,
 `enc Camera*`, …). Add `--json` to any command for the server's raw reply.

@@ -61,6 +61,13 @@ Typical loop:
   reclass define Player 0x1C f32 health   name what you found
   reclass view '[$GWorld]+0x28' -c Player -f 1   follow pointers one level
 
+Finding a value (e.g. health is 100, then 93 after taking damage):
+  reclass scan i32 100                    every address holding 100
+  reclass next 93                         keep those that now hold 93
+  reclass next decreased                  or: keep those that went down
+  reclass results                         list what is left
+  reclass scan f32 unknown                when the value is not shown anywhere
+
 Pointers are printed with 0x so they can be pasted back as EXPR.
 Add --json to any command for the server's raw reply.";
 
@@ -209,6 +216,51 @@ instruction; it is not the address of the match.")]
     },
     /// Delete a signature.
     DeleteSig { name: String },
+    /// Start a value scan: find every address holding a value.
+    #[command(after_help = "\
+TYPE is i8..i64, u8..u64, f32, f64, text or bytes. VALUE is a number (0x for
+hex), MIN..MAX, `unknown` to snapshot everything for later comparison, a string
+for text, or a pattern like \"48 8B ?? 05\" for bytes. A float matches to the
+digits typed: 100 matches 99.5 to 100.5.
+
+Without --module or --range, a 32-bit process is scanned whole; a 64-bit one is
+scanned in its modules and the heap memory their pointers lead to.")]
+    Scan {
+        #[arg(value_name = "TYPE")]
+        ty: String,
+        value: String,
+        /// Only scan this module's image.
+        #[arg(long, conflicts_with = "range")]
+        module: Option<String>,
+        /// Only scan from START to END (expressions).
+        #[arg(long, num_args = 2, value_names = ["START", "END"])]
+        range: Option<Vec<String>>,
+        /// Address alignment (default: the value's size up to 4; 1 for text and bytes).
+        #[arg(long)]
+        align: Option<String>,
+        /// Also scan read-only parts of module images: code and constants.
+        #[arg(long)]
+        read_only: bool,
+    },
+    /// Narrow the current scan by the values' new state.
+    #[command(after_help = "\
+CONDITION is one of:
+  VALUE or MIN..MAX          now equal to or within
+  changed, unchanged         compared with the last scan
+  increased, decreased       compared with the last scan
+  increased N, decreased N   changed by exactly N
+  exact VALUE                a value that looks like a keyword, e.g. text \"changed\"")]
+    Next {
+        condition: String,
+        value: Option<String>,
+    },
+    /// List the current scan's results with their current values.
+    Results {
+        #[arg(short, long, default_value_t = 20)]
+        limit: usize,
+        #[arg(short, long, default_value_t = 0)]
+        offset: u64,
+    },
     /// Show the project's pointer size, or convert it to 4 (32-bit) or 8 bytes.
     #[command(
         after_help = "Attaching converts the project to the process's pointer size automatically.
@@ -683,6 +735,78 @@ impl App {
                     _ => format!("${name} saved\n"),
                 })
             }
+            Scan {
+                ty,
+                value,
+                module,
+                range,
+                align,
+                read_only,
+            } => {
+                let mut params = json!({ "type": ty, "readOnly": read_only });
+                match value.as_str() {
+                    "unknown" | "?" => params["unknown"] = json!(true),
+                    v => match range_of(v) {
+                        Some((lo, hi)) if ty != "text" && ty != "bytes" => {
+                            params["min"] = json!(lo);
+                            params["max"] = json!(hi);
+                        }
+                        _ => params["value"] = json!(v),
+                    },
+                }
+                if let Some(m) = module {
+                    params["module"] = json!(m);
+                }
+                if let Some(r) = range {
+                    params["start"] = json!(r[0]);
+                    params["end"] = json!(r[1]);
+                }
+                if let Some(a) = align {
+                    params["align"] = json!(number(&a)?);
+                }
+                let r = self.call("scan", params)?;
+                if self.json {
+                    return raw(r);
+                }
+                let mut out = format!(
+                    "{} in {} ms ({} MiB in {} regions)\n",
+                    results(&r["count"]),
+                    r["ms"],
+                    r["bytes"].as_u64().unwrap_or(0) >> 20,
+                    r["regions"]
+                );
+                out.push_str(&self.few_results(&r)?);
+                Ok(out)
+            }
+            Next { condition, value } => {
+                let params = match (condition.as_str(), value) {
+                    ("changed" | "unchanged" | "increased" | "decreased", None) => {
+                        json!({ "cond": condition })
+                    }
+                    ("increased", Some(v)) => json!({ "cond": "increasedBy", "value": v }),
+                    ("decreased", Some(v)) => json!({ "cond": "decreasedBy", "value": v }),
+                    ("exact", Some(v)) => json!({ "cond": "exact", "value": v }),
+                    (v, None) => match range_of(v) {
+                        Some((lo, hi)) => json!({ "cond": "between", "min": lo, "max": hi }),
+                        None => json!({ "cond": "exact", "value": v }),
+                    },
+                    (c, Some(_)) => bail!("'{c}' takes no value; see `reclass next --help`"),
+                };
+                let r = self.call("scanNext", params)?;
+                if self.json {
+                    return raw(r);
+                }
+                let mut out = format!("{} in {} ms\n", results(&r["count"]), r["ms"]);
+                out.push_str(&self.few_results(&r)?);
+                Ok(out)
+            }
+            Results { limit, offset } => {
+                let r = self.call("scanResults", json!({ "offset": offset, "limit": limit }))?;
+                if self.json {
+                    return raw(r);
+                }
+                Ok(render::scan_results(&r, offset))
+            }
             PointerSize { size } => {
                 if let Some(size) = size {
                     self.call("setPointerSize", json!({ "size": size }))?;
@@ -716,6 +840,17 @@ impl App {
                 };
                 raw(self.call(&method, params)?)
             }
+        }
+    }
+
+    /// The results after a scan, when there are few enough to be worth showing.
+    fn few_results(&self, scan: &Value) -> Result<String> {
+        match scan["count"].as_u64() {
+            Some(n) if n > 0 && n <= 10 => {
+                let r = self.call("scanResults", json!({ "limit": 10 }))?;
+                Ok(render::scan_results(&r, 0))
+            }
+            _ => Ok(String::new()),
         }
     }
 
@@ -786,6 +921,19 @@ fn filtered(list: &Value, key: &str, filter: Option<&str>) -> Vec<Value> {
         })
         .cloned()
         .collect()
+}
+
+fn results(count: &Value) -> String {
+    match count.as_u64() {
+        Some(1) => "1 result".into(),
+        _ => format!("{count} results"),
+    }
+}
+
+/// Splits `MIN..MAX`.
+fn range_of(s: &str) -> Option<(&str, &str)> {
+    let (lo, hi) = s.split_once("..")?;
+    (!lo.is_empty() && !hi.is_empty()).then_some((lo, hi))
 }
 
 /// Lets `--before health` mean `--before Player.health`.

@@ -6,6 +6,7 @@
 mod access;
 mod canvas;
 mod inspect;
+mod scanning;
 mod workspace;
 
 use std::{
@@ -97,6 +98,7 @@ struct Args {
 struct AppState {
     ws: Arc<Mutex<Workspace>>,
     events: broadcast::Sender<Arc<str>>,
+    scan: Arc<Mutex<Option<scanning::Session>>>,
 }
 
 impl AppState {
@@ -107,6 +109,9 @@ impl AppState {
 
     /// Runs a command, broadcasts what changed and returns the reply body.
     async fn exec(&self, method: String, params: Value) -> Value {
+        if scanning::is_scan_method(&method) {
+            return self.exec_scan(method, params).await;
+        }
         let state = self.clone();
         tokio::task::spawn_blocking(move || {
             let mut ws = state.ws.lock().unwrap();
@@ -122,6 +127,26 @@ impl AppState {
                     state.publish(&frame);
                     json!({ "ok": true, "result": result })
                 }
+                Err(error) => json!({ "ok": false, "error": error }),
+            }
+        })
+        .await
+        .unwrap_or_else(|e| json!({ "ok": false, "error": format!("command panicked: {e}") }))
+    }
+}
+
+impl AppState {
+    /// Scans hold the workspace only to look up the process, so the UI stays
+    /// live while one reads memory. They change nothing to broadcast.
+    async fn exec_scan(&self, method: String, params: Value) -> Value {
+        let state = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let target = state.ws.lock().unwrap().scan_target(&params);
+            let result = target.and_then(|target| {
+                scanning::handle(&mut state.scan.lock().unwrap(), target, &method, &params)
+            });
+            match result {
+                Ok(result) => json!({ "ok": true, "result": result }),
                 Err(error) => json!({ "ok": false, "error": error }),
             }
         })
@@ -257,6 +282,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         ws: Arc::new(Mutex::new(ws)),
         events,
+        scan: Arc::default(),
     };
 
     // Live frames.

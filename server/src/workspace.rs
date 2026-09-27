@@ -52,6 +52,7 @@ use crate::{
         ROOT,
     },
     inspect::Inspector,
+    scanning::Target,
 };
 
 /// What changed as a result of a command, so the caller knows what to broadcast.
@@ -267,6 +268,41 @@ impl Workspace {
         if let Some(src) = &self.source {
             src.tick();
         }
+    }
+
+    /// What a scan should read: the process, and the module or the `start` and
+    /// `end` expressions the params name, if any. `None` when detached.
+    pub fn scan_target(&self, p: &Value) -> Result<Option<Target>, String> {
+        let Some(source) = self.source.clone() else {
+            return Ok(None);
+        };
+        let text = |k: &str| p.get(k).and_then(Value::as_str);
+        let within = match (text("module"), text("start"), text("end")) {
+            (Some(name), None, None) => {
+                let m = source
+                    .module_by_name(name)
+                    .ok_or_else(|| format!("no module {name}"))?;
+                Some((m.base, m.base + m.size))
+            }
+            (None, Some(start), Some(end)) => {
+                let (start, end) = (self.eval(start)?, self.eval(end)?);
+                if end <= start {
+                    return Err("the range ends before it starts".into());
+                }
+                // Probing costs about a second per 4 GiB of address space.
+                if end - start > 64 << 30 {
+                    return Err("the range is larger than 64 GiB".into());
+                }
+                Some((start, end))
+            }
+            (None, None, None) => None,
+            _ => return Err("pass a module, or both start and end".into()),
+        };
+        Ok(Some(Target {
+            source,
+            pointer_size: self.memory.pointer_size,
+            within,
+        }))
     }
 
     pub fn is_attached(&self) -> bool {

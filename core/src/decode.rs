@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn vector2_decodes_both_components_and_preserves_following_offset() {
-        let base = 0x1F3_0000_1000;
+        let base = 0x1F3_A8F8_0000;
         let source = DemoSource::new();
         source.poke(
             base,
@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn vector2_array_uses_eight_byte_stride() {
-        let base = 0x1F3_0000_1000;
+        let base = 0x1F3_A8F8_0000;
         let source = DemoSource::new();
         source.poke(
             base,
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn pointers_of_32_bit_targets_are_dwords() {
-        let base = 0x1F3_0000_1000;
+        let base = 0x1F3_A8F8_0000;
         let source = DemoSource::new();
         source.poke(base, &[0x78, 0x56, 0x34, 0x12, 0x2A, 0, 0, 0]);
         let mut class = ClassDefinition::new("Small".into());

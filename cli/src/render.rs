@@ -189,6 +189,40 @@ pub fn layout(class: &Value, root: bool) -> String {
     out
 }
 
+/// The reply of `scanResults`: address, value, the value at the last scan when
+/// it differs, and the module the address is in.
+pub fn scan_results(r: &Value, offset: u64) -> String {
+    let rows: Vec<Vec<String>> = r["results"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|h| {
+            let value = h["value"].as_str().unwrap_or("<unreadable>");
+            let previous = str_of(&h["previous"]);
+            vec![
+                format!("0x{}", str_of(&h["address"])),
+                value.to_string(),
+                if previous == value {
+                    String::new()
+                } else {
+                    format!("was {previous}")
+                },
+                str_of(&h["symbol"]).to_string(),
+            ]
+        })
+        .collect();
+    let mut out = table(&rows);
+    let count = u64_of(&r["count"]);
+    let shown = offset + rows.len() as u64;
+    if shown < count {
+        out.push_str(&format!(
+            "… {} more; pass --offset {shown}\n",
+            count - shown
+        ));
+    }
+    out
+}
+
 /// 16 bytes per line with an ASCII column.
 pub fn hexdump(address: u64, hex: &str) -> String {
     let bytes: Vec<u8> = (0..hex.len() / 2)
