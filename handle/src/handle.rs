@@ -256,11 +256,8 @@ impl AppHandle {
             })?;
 
         let value = u32::read_object(&*self.create_memory_view(), inst_offset + signature.offset)
-            .map_err(|err| anyhow::anyhow!("{}", err))? as u64;
-        let value = match &signature.value_type {
-            SignatureType::Offset => value,
-            SignatureType::RelativeAddress { inst_length } => inst_offset + value + inst_length,
-        };
+            .map_err(|err| anyhow::anyhow!("{}", err))?;
+        let value = resolve_signature_value(&signature.value_type, inst_offset, value);
 
         match &signature.value_type {
             SignatureType::Offset => log::trace!(
@@ -277,5 +274,51 @@ impl AppHandle {
         }
 
         Ok(value)
+    }
+}
+
+fn resolve_signature_value(value_type: &SignatureType, inst_offset: u64, value: u32) -> u64 {
+    match value_type {
+        SignatureType::Offset => value as u64,
+        SignatureType::RelativeAddress { inst_length } => inst_offset
+            .wrapping_add(*inst_length)
+            .wrapping_add_signed(value as i32 as i64),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_signature_resolves_backward() {
+        assert_eq!(
+            resolve_signature_value(
+                &SignatureType::RelativeAddress { inst_length: 7 },
+                0x1000,
+                (-0x107_i32) as u32,
+            ),
+            0xF00,
+        );
+    }
+
+    #[test]
+    fn relative_signature_resolves_forward() {
+        assert_eq!(
+            resolve_signature_value(
+                &SignatureType::RelativeAddress { inst_length: 7 },
+                0x1000,
+                0xF9,
+            ),
+            0x1100,
+        );
+    }
+
+    #[test]
+    fn structure_offset_remains_unsigned() {
+        assert_eq!(
+            resolve_signature_value(&SignatureType::Offset, 0x1000, 0xFFFF_FEF9),
+            0xFFFF_FEF9,
+        );
     }
 }
